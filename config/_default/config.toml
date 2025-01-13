@@ -1,7 +1,7 @@
 # Change baseurl before deploy
 baseurl = "https://georgelyu.github.io"
 languageCode = "zh-cn"
-title = "George Lyu's House"
+title = "吕超阳的博客"
 
 # Theme i18n support
 # Available values: en, fr, id, ja, ko, pt-br, zh-cn, zh-tw, es, de, nl, it, th, el, uk, ar
