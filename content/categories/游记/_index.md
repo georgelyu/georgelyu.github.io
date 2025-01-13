@@ -1,7 +1,7 @@
 ---
 title: 游记
 description: 出游的记录
-image:
+image: "bg.jpg"
 
 # Badge style
 style:
