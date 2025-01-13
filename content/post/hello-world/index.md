@@ -1,20 +1,20 @@
 ---
-title: Hello World
-description: Welcome to Hugo Theme Stack
+title: 中文测试
+description: 估计第一篇会是游记吧
 slug: hello-world
-date: 2022-03-06 00:00:00+0000
+date: 2025-01-14 02:42:13+0800
 image: cover.jpg
 categories:
-    - Example Category
-tags:
-    - Example Tag
+    - 游记
 weight: 1       # You can add weight to some posts to override the default sorting (date descending)
 ---
 
-Welcome to Hugo theme Stack. This is your first post. Edit or delete it, then start writing!
+在这里写点中文试试。
 
-For more information about this theme, check the documentation: https://stack.jimmycai.com/
+## 航班
 
-Want a site like this? Check out [hugo-theme-stack-stater](https://github.com/CaiJimmy/hugo-theme-stack-starter)
+航班情况挺好的。
 
-> Photo by [Pawel Czerwinski](https://unsplash.com/@pawel_czerwinski) on [Unsplash](https://unsplash.com/)
+![](cover.jpg)
+
+但是总体

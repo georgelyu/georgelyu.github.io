@@ -1,6 +1,6 @@
 ---
-title: Example Category
-description: A description of this category
+title: 游记
+description: 出游的记录
 image:
 
 # Badge style
