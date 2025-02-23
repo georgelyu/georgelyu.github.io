@@ -3,7 +3,7 @@ title: CUDA GEMM 优化
 description: CUDA 矩阵乘法的一步步优化指南
 slug: cuda_gemm_opt
 date: 2025-02-22 21:32:50+0800
-image: cover.jpg
+# image: cover.jpg
 categories:
     - CUDA
 weight: 1       # You can add weight to some posts to override the default sorting (date descending)
@@ -194,4 +194,4 @@ void MyMatMul(float* d_A, float* d_B, float* d_C, int m, int n, int k) {
 
 在这一版中，由于我进行了上面的计算，所以我发现，如果 stride 超过 2，比如 stride 为 4 时，每个 block 的大小为 64 个线程，这样每个 block 的线程就会过小，使得 SM 填不满。上面我们提到，一个 SM 中只能驻 16 个 block，所以在这种情况下只能驻 $16 \times 64 = 1024$ 个线程。这会让 occupancy 掉至 $1024 \div 1536 \approx 66.7$%。所以这里我先令 stride 为 2，测试结果可以达到大约 4.1 TFLOPS（又一个小小进步）。
 
-
+## 第四版实现：stride 调参
