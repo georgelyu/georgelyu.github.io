@@ -697,3 +697,5 @@ void MyMatMul(float* d_A, float* d_B, float* d_C, int m, int n, int k) {
                  kBlockTileDimK, kNumOfThreads><<<grid, block>>>(d_A, d_B, d_C, m, n, k);
 }
 ```
+
+这一版的效率可以大概达到 20TFLOPS。
