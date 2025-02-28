@@ -48,7 +48,7 @@ void MyMatMul(float* d_A, float* d_B, float* d_C, int m, int n, int k) {
 
 并且注意到，这里的写法已经进行了 global memory 的 coalesced access。
 
-## 第二版实现：tiling
+## 第二版实现：block tiling
 
 第二版使用了 PMPP 第 5.4 和 5.5 节中提到的 tiling 方法，即将会被重复使用的数据放置在 block 的 shared memory 中，这样减少了 global memory 的重复传输。这个思想也是对应原 repo 中的 [MMult_cuda_3.cu](https://github.com/tpoisonooo/how-to-optimize-gemm/blob/master/cuda/MMult_cuda_3.cu)。
 
@@ -356,7 +356,7 @@ void MyMatMul(float* d_A, float* d_B, float* d_C, int m, int n, int k) {
 }
 ```
 
-这个优化的关键在于第 60-70 行。通过 2D 的 thread coarsening，原理与 1D thread coarsening 类似，但是元素的重用可以更多。可以以 (kThreadWorkDimX + kThreadWorkDimY) 次 shared memory 加载进行 (kThreadWorkDimX * kThreadWorkDimY) 次乘加计算（图示过程参考[该文的 Kernel 5 部分](https://siboehm.com/articles/22/CUDA-MMM)）。
+这个优化的关键在于第 60-70 行。通过 2D 的 thread coarsening，原理与 1D thread coarsening 类似，但是元素的重用可以更多。可以以 (kThreadWorkDimX + kThreadWorkDimY) 次 shared memory 加载进行 (kThreadWorkDimX * kThreadWorkDimY) 次乘加计算（图示过程参考[该文的 Kernel 5 部分](https://siboehm.com/articles/22/CUDA-MMM)）和[该文的第 1.3 节](https://zhuanlan.zhihu.com/p/441146275)。
 
 这时每个线程需要的访存量（只考虑读）变为：
 
@@ -369,3 +369,331 @@ void MyMatMul(float* d_A, float* d_B, float* d_C, int m, int n, int k) {
 - SMEM：K / 2 loads
 
 经过测试，这时性能已经来到了 15 TFLOPS，相比之前最高的 6 TFLOPS 可以说达到了质的飞跃。
+
+## 第五版实现：vectorized memory access
+
+这一版主要做了两个改变：
+
+1. 在数据从 GMEM 读到 SMEM 时，把 As 进行转置，这样子可以进行 SMEM 的合并读取；
+2. 在读写 GMEM 和 SMEM 时使用 `float4`，以使用向量化的指令（如 `lde.e.128`、`stg.e.128`、`lds.128`、`sts.128`等）
+
+代码如下：
+
+```c++
+#define A(i, j) d_A[(i) * k + (j)]
+#define B(i, j) d_B[(i) * n + (j)]
+#define C(i, j) d_C[(i) * n + (j)]
+
+// Tiled version with 2D thread coarsening and vectorized memory access
+template <int kBlockWorkDimX, int kBlockWorkDimY, int kThreadWorkDimX,
+          int kThreadWorkDimY, int kTileDimK>
+__global__ void MyMatMulKernel(float* d_A, float* d_B, float* d_C, int m, int n, int k) {
+  // Introduce kTileDimK, so the tile is not square, otherwise it would be too large
+  // Here Ads is transposed
+  __shared__ Value_t Ads_T[kTileDimK][kBlockWorkDimY];
+  __shared__ Value_t Bds[kTileDimK][kBlockWorkDimX];
+
+  const int by = blockIdx.y;
+  const int bx = blockIdx.x;
+
+  // (thread_outer_x, thread_outer_y) is the thread's outer position w.r.t. block.
+  const int thread_outer_x = threadIdx.x % (kBlockWorkDimX / kThreadWorkDimX);
+  const int thread_outer_y = threadIdx.x / (kBlockWorkDimX / kThreadWorkDimX);
+
+  // Move tile to beginning of d_A's row and d_B's column
+  d_A += by * kBlockWorkDimY * k;
+  d_B += bx * kBlockWorkDimX;
+  d_C += by * kBlockWorkDimY * n + bx * kBlockWorkDimX;
+
+  // Calculate the indices that this thread will load into SMEM
+  const int Ads_row = threadIdx.x / (kTileDimK / 4);
+  const int Ads_col = threadIdx.x % (kTileDimK / 4);
+  const int Bds_row = threadIdx.x / (kBlockWorkDimX / 4);
+  const int Bds_col = threadIdx.x % (kBlockWorkDimX / 4);
+
+  // The stride is for GMEM coalescing
+  constexpr int thread_num_in_block =
+      (kBlockWorkDimX * kBlockWorkDimY) / (kThreadWorkDimX * kThreadWorkDimY);
+
+  const int strideA = thread_num_in_block / (kTileDimK / 4);
+  const int strideB = thread_num_in_block / (kBlockWorkDimX / 4);
+
+  // Register caches for Ads and Bds
+  Value_t A_reg[kThreadWorkDimY] = {0.0};
+  Value_t B_reg[kThreadWorkDimX] = {0.0};
+
+  Value_t c_value[kThreadWorkDimY][kThreadWorkDimX] = {0};
+  /* k operations of multiply-add are divided into phases, each phase correspond to an
+   * iteration of for-loop */
+  for (int ph = 0; ph < std::ceil((Value_t)k / kTileDimK); ++ph) {
+    /* Collectively load data into shared memory */
+    for (int loadOffset = 0; loadOffset < kBlockWorkDimY; loadOffset += strideA) {
+      // Here A is transpoed and saved into SMEM
+      float4 tmp = reinterpret_cast<float4*>(&A(Ads_row + loadOffset, Ads_col * 4))[0];
+      Ads_T[Ads_col * 4 + 0][Ads_row + loadOffset] = tmp.x;
+      Ads_T[Ads_col * 4 + 1][Ads_row + loadOffset] = tmp.y;
+      Ads_T[Ads_col * 4 + 2][Ads_row + loadOffset] = tmp.z;
+      Ads_T[Ads_col * 4 + 3][Ads_row + loadOffset] = tmp.w;
+    }
+    for (int loadOffset = 0; loadOffset < kTileDimK; loadOffset += strideB)
+      reinterpret_cast<float4*>(&Bds[Bds_row + loadOffset][Bds_col * 4])[0] =
+          reinterpret_cast<float4*>(&B(Bds_row + loadOffset, Bds_col * 4))[0];
+
+    // Make sure all threads in block finished loading data
+    __syncthreads();
+
+    // Advance tile
+    d_A += kTileDimK;      // move kTileDimK columns to right
+    d_B += kTileDimK * n;  // move kTileDimK rows down
+
+    // Calculate per-thread results
+    for (int k = 0; k < kTileDimK; ++k) {
+      // SMEM to registers
+      // Due to transposed A in SMEM, the row and col indicies are switched
+      for (int i = 0; i < kThreadWorkDimY; ++i)
+        A_reg[i] = Ads_T[k][thread_outer_y * kThreadWorkDimY + i];
+      for (int i = 0; i < kThreadWorkDimX; ++i)
+        B_reg[i] = Bds[k][thread_outer_x * kThreadWorkDimX + i];
+
+      for (int cy = 0; cy < kThreadWorkDimY; ++cy)
+        for (int cx = 0; cx < kThreadWorkDimX; ++cx)
+          c_value[cy][cx] += A_reg[cy] * B_reg[cx];
+    }
+
+    // Make sure all threads in block finished using shared memory, so that we can go
+    // into next iteration
+    __syncthreads();
+  }
+
+  // Write results to GMEM
+  for (int cy = 0; cy < kThreadWorkDimY; ++cy)
+    for (int cx = 0; cx < kThreadWorkDimX; cx += 4)
+      reinterpret_cast<float4*>(&C(thread_outer_y * kThreadWorkDimY + cy,
+                                   thread_outer_x * kThreadWorkDimX + cx))[0] =
+          reinterpret_cast<float4*>(&c_value[cy][cx])[0];
+}
+
+void MyMatMul(float* d_A, float* d_B, float* d_C, int m, int n, int k) {
+  // This is LOGICAL, not REAL block dim.
+  constexpr int kThreadWorkDimX = 8;
+  constexpr int kThreadWorkDimY = 8;
+
+  // kBlockWorkDimX/kThreadWorkDimX and kBlockWorkDimY/kThreadWorkDimY must be exact
+  // division.
+  constexpr int kBlockWorkDimX = 8 * kThreadWorkDimX;
+  constexpr int kBlockWorkDimY = 8 * kThreadWorkDimY;
+
+  constexpr int kTileDimK = 8;
+
+  dim3 block((kBlockWorkDimX * kBlockWorkDimY) / (kThreadWorkDimX * kThreadWorkDimY));
+
+  dim3 grid((n + kBlockWorkDimX - 1) / kBlockWorkDimX,
+            (m + kBlockWorkDimY - 1) / kBlockWorkDimY);
+
+  MyMatMulKernel<kBlockWorkDimX, kBlockWorkDimY, kThreadWorkDimX, kThreadWorkDimY,
+                 kTileDimK><<<grid, block>>>(d_A, d_B, d_C, m, n, k);
+}
+```
+
+这一版的效率可以达到约 18 TFLOPS。
+
+## 第六版实现：warp tiling
+
+在第四版实现时我们说了，现在一个 thread tile 可以用 (kThreadWorkDimX + kThreadWorkDimY) 次 shared memory 加载进行 (kThreadWorkDimX * kThreadWorkDimY) 次乘加计算。所以很明显，在乘积确定时，kThreadWorkDimX 和 kThreadWorkDimY 越接近，算存比会越高。
+
+那么对于一个 warp 的 32 个线程来说，这一过程是要进行 32 次的。我们可以认为每个 thread 在把数据从 SMEM 移至寄存器时，我们无形中是获得了 32 个 thread tile 在 warp 上。而这 32 个 thread tile 如果没有经过任何排布，比如是排成一行，那么可以想象，就和一个排成一行的 thread tile 一样，并没有最大化算存比。
+
+所以通过使用 warp tile，即把 warp 也做类似的 coarsening，我们能做到的一个重要的事情是，我们可以手动控制这个 warp 的 thread tile 的分布。所以我们可以通过控制维度来让 warp 内 thread tile 的排列变成尽可能方形的，来最大化算存比。
+
+同时我们注意到，在 kThreadWorkDimX = kThreadWorkDimY 时，这个值越大，算存比就越大。所以这样做给我们带来的另一个好处是，我们变相获得了一个很大的 thread tile。
+
+![Warp tile 的示意图”。](warp_tiles.jpg)
+
+代码如下：
+
+```c++
+#define A(i, j) d_A[(i) * k + (j)]
+#define B(i, j) d_B[(i) * n + (j)]
+#define C_interim(i, j) d_C_interim[(i) * n + (j)]
+
+// Tiled version with 2D thread coarsening, vectorized memory access and 2D warp tiling
+template <int kBlockWorkDimX, int kBlockWorkDimY, int kWarpWorkDimX, int kWarpWorkDimY,
+          int kWarpTileWorkDimX, int kWarpTileWorkDimY, int kThreadWorkDimX,
+          int kThreadWorkDimY, int kBlockTileDimK, int kThreadNumInBlock>
+__global__ void MyMatMulKernel(float* d_A, float* d_B, float* d_C, int m, int n, int k) {
+  // Introduce kTileDimK, so the tile is not square, otherwise it would be too large
+  // Here Ads is transposed
+  __shared__ Value_t Ads_T[kBlockTileDimK][kBlockWorkDimY];
+  __shared__ Value_t Bds[kBlockTileDimK][kBlockWorkDimX];
+
+  const int by = blockIdx.y;
+  const int bx = blockIdx.x;
+
+  constexpr int kWarpSize = 32;
+  const int warpIdx = threadIdx.x / kWarpSize;  // the warp this thread is in
+
+  const int wy = warpIdx / (kBlockWorkDimX / kWarpWorkDimX);
+  const int wx = warpIdx % (kBlockWorkDimX / kWarpWorkDimX);
+
+  // thread's position w.r.t. warp tile (ACTUAL warp).
+  const int threadIdxInWarp = threadIdx.x % kWarpSize;
+  const int ty_in_acutal_warp = threadIdxInWarp / (kWarpTileWorkDimX / kThreadWorkDimX);
+  const int tx_in_acutal_warp = threadIdxInWarp % (kWarpTileWorkDimX / kThreadWorkDimX);
+
+  // Move tile to beginning of d_A's row and d_B's column
+  d_A += by * kBlockWorkDimY * k;
+  d_B += bx * kBlockWorkDimX;
+  // Here output position needs to go to warp output position
+  d_C += (by * kBlockWorkDimY + wy * kWarpWorkDimY) * n + bx * kBlockWorkDimX +
+         wx * kWarpWorkDimX;
+
+  // Calculate the indices that this thread will load into SMEM
+  const int Ads_row = threadIdx.x / (kBlockTileDimK / 4);
+  const int Ads_col = threadIdx.x % (kBlockTileDimK / 4);
+  const int Bds_row = threadIdx.x / (kBlockWorkDimX / 4);
+  const int Bds_col = threadIdx.x % (kBlockWorkDimX / 4);
+
+  const int strideA = kThreadNumInBlock / (kBlockTileDimK / 4);
+  const int strideB = kThreadNumInBlock / (kBlockWorkDimX / 4);
+
+  constexpr int kWarpTileNumY = kWarpWorkDimY / kWarpTileWorkDimY;
+  constexpr int kWarpTileNumX = kWarpWorkDimX / kWarpTileWorkDimX;
+
+  // Register caches for Ads and Bds (on the warptile level)
+  Value_t A_reg[kWarpTileNumY][kThreadWorkDimY] = {0.0};
+  Value_t B_reg[kWarpTileNumX][kThreadWorkDimX] = {0.0};
+
+  // Results are in register file in warp scheduler
+  Value_t c_value[kWarpTileNumY][kWarpTileNumX][kThreadWorkDimY][kThreadWorkDimX] = {0};
+
+  /* k operations of multiply-add are divided into phases, each phase correspond to an
+   * iteration of for-loop */
+  for (int ph = 0; ph < std::ceil((Value_t)k / kBlockTileDimK); ++ph) {
+    /* Collectively load data into shared memory */
+    for (int loadOffset = 0; loadOffset < kBlockWorkDimY; loadOffset += strideA) {
+      // Here A is transpoed and saved into SMEM
+      float4 tmp = reinterpret_cast<float4*>(&A(Ads_row + loadOffset, Ads_col * 4))[0];
+      Ads_T[Ads_col * 4 + 0][Ads_row + loadOffset] = tmp.x;
+      Ads_T[Ads_col * 4 + 1][Ads_row + loadOffset] = tmp.y;
+      Ads_T[Ads_col * 4 + 2][Ads_row + loadOffset] = tmp.z;
+      Ads_T[Ads_col * 4 + 3][Ads_row + loadOffset] = tmp.w;
+    }
+    for (int loadOffset = 0; loadOffset < kBlockTileDimK; loadOffset += strideB)
+      reinterpret_cast<float4*>(&Bds[Bds_row + loadOffset][Bds_col * 4])[0] =
+          reinterpret_cast<float4*>(&B(Bds_row + loadOffset, Bds_col * 4))[0];
+
+    // Make sure all threads in block finished loading data
+    __syncthreads();
+
+    // Advance tile
+    d_A += kBlockTileDimK;      // move kTileDimK columns to right
+    d_B += kBlockTileDimK * n;  // move kTileDimK rows down
+
+    // Calculate per-thread results
+    for (int k = 0; k < kBlockTileDimK; ++k) {
+      // SMEM to registers
+      // Due to transposed A in SMEM, the row and col indicies are switched
+      for (int w_sub_y = 0; w_sub_y < kWarpTileNumY; ++w_sub_y)
+        for (int i = 0; i < kThreadWorkDimY; ++i)
+          A_reg[w_sub_y][i] = Ads_T[k][wy * kWarpWorkDimY + w_sub_y * kWarpTileWorkDimY +
+                                       ty_in_acutal_warp * kThreadWorkDimY + i];
+      for (int w_sub_x = 0; w_sub_x < kWarpTileNumX; ++w_sub_x)
+        for (int i = 0; i < kThreadWorkDimX; ++i)
+          B_reg[w_sub_x][i] = Bds[k][wx * kWarpWorkDimX + w_sub_x * kWarpTileWorkDimX +
+                                     tx_in_acutal_warp * kThreadWorkDimX + i];
+
+      for (int w_sub_y = 0; w_sub_y < kWarpTileNumY; ++w_sub_y)
+        for (int w_sub_x = 0; w_sub_x < kWarpTileNumX; ++w_sub_x)
+          for (int cy = 0; cy < kThreadWorkDimY; ++cy)
+            for (int cx = 0; cx < kThreadWorkDimX; ++cx)
+              c_value[w_sub_y][w_sub_x][cy][cx] +=
+                  A_reg[w_sub_y][cy] * B_reg[w_sub_x][cx];
+    }
+
+    // Make sure all threads in block finished using shared memory, so that we can go
+    // into next iteration
+    __syncthreads();
+  }
+
+  // Write results to GMEM
+  for (int w_sub_y = 0; w_sub_y < kWarpTileNumY; ++w_sub_y)
+    for (int w_sub_x = 0; w_sub_x < kWarpTileNumX; ++w_sub_x) {
+      // move C pointer to current warp subtile
+      Value_t* d_C_interim =
+          d_C + (w_sub_y * kWarpTileWorkDimY) * n + w_sub_x * kWarpTileWorkDimX;
+
+      for (int cy = 0; cy < kThreadWorkDimY; ++cy)
+        for (int cx = 0; cx < kThreadWorkDimX; cx += 4)
+          reinterpret_cast<float4*>(
+              &C_interim(ty_in_acutal_warp * kThreadWorkDimY + cy,
+                         tx_in_acutal_warp * kThreadWorkDimX + cx))[0] =
+              reinterpret_cast<float4*>(&c_value[w_sub_y][w_sub_x][cy][cx])[0];
+    }
+}
+
+void MyMatMul(float* d_A, float* d_B, float* d_C, int m, int n, int k) {
+  // This is LOGICAL, not REAL block dim.
+  constexpr int kNumOfThreads = 128;
+  constexpr int kWarpSize = 32;
+  constexpr int kNumOfWarps = kNumOfThreads / kWarpSize;
+
+  constexpr int kThreadWorkDimX = 4;  // in elemenets
+  constexpr int kThreadWorkDimY = 8;  // in elemenets
+
+  // The work dim of one ACTUAL warp
+  constexpr int kWarpTileWorkDimX = 4 * kThreadWorkDimX;  // 16 (in elemenets)
+  constexpr int kWarpTileWorkDimY = kWarpSize / (kWarpTileWorkDimX / kThreadWorkDimX) *
+                                kThreadWorkDimY;  // 64 (in elemenets)
+
+  // The work dim of one LOGICAL warp
+  constexpr int kWarpWorkDimX = 4 * kWarpTileWorkDimX;  // 64 (in elemenets)
+  constexpr int kWarpWorkDimY = 1 * kWarpTileWorkDimY;  // 64 (in elemenets)
+
+  constexpr int kBlockWorkDimX = 2 * kWarpWorkDimX;  // 128 (in elemenets)
+  constexpr int kBlockWorkDimY = 2 * kWarpWorkDimY;  // 128 (in elemenets)
+
+  constexpr int kBlockTileDimK = 16;
+
+  static_assert(
+      (kBlockWorkDimX % kWarpWorkDimX == 0) && (kBlockWorkDimY % kWarpWorkDimY == 0),
+      "Block work dim is integral multiple of warp work dim.");
+  static_assert(
+      (kBlockWorkDimX / kWarpWorkDimX) * (kBlockWorkDimY / kWarpWorkDimY) == kNumOfWarps,
+      "Number of warps times its work dim should be equal to block work dim.");
+  static_assert((kWarpWorkDimY * kWarpWorkDimX) %
+                        (kWarpSize * kThreadWorkDimY * kThreadWorkDimX * kNumOfWarps) ==
+                    0,
+                "Warp work dim is integral multiple of thread work dim.");
+  static_assert(kWarpWorkDimX % kNumOfWarps == 0,
+                "Warp work dim is multiple of NUM_WARP");
+  static_assert((kNumOfThreads * 4) % kBlockTileDimK == 0,
+                "NUM_THREADS*4 must be multiple of kTileDimK to avoid quantization "
+                "issues during GMEM->SMEM tiling (loading only parts of the "
+                "final row of Bs during each iteraion)");
+  static_assert((kNumOfThreads * 4) % kBlockWorkDimX == 0,
+                "NUM_THREADS*4 must be multiple of kBlockWorkDimX to avoid quantization "
+                "issues during GMEM->SMEM tiling (loading only parts of the "
+                "final row of As during each iteration)");
+  static_assert(kBlockWorkDimX % (16 * kThreadWorkDimX) == 0,
+                "kBlockWorkDimX must be a multiple of 16*kThreadWorkDimX to avoid "
+                "quantization effects");
+  static_assert(kBlockWorkDimY % (16 * kThreadWorkDimY) == 0,
+                "kBlockWorkDimY must be a multiple of 16*kThreadWorkDimY to avoid "
+                "quantization effects");
+  static_assert((kBlockWorkDimY * kBlockTileDimK) % (4 * kNumOfThreads) == 0,
+                "kBlockWorkDimY*kTileDimK must be a multiple of 4*kNumOfThreads to "
+                "vectorize loads");
+  static_assert((kBlockWorkDimX * kBlockTileDimK) % (4 * kNumOfThreads) == 0,
+                "kBlockWorkDimX*kTileDimK must be a multiple of 4*kNumOfThreads to "
+                "vectorize loads");
+
+  dim3 block(kNumOfThreads);
+
+  dim3 grid((n + kBlockWorkDimX - 1) / kBlockWorkDimX,
+            (m + kBlockWorkDimY - 1) / kBlockWorkDimY);
+
+  MyMatMulKernel<kBlockWorkDimX, kBlockWorkDimY, kWarpWorkDimX, kWarpWorkDimY,
+                 kWarpTileWorkDimX, kWarpTileWorkDimY, kThreadWorkDimX, kThreadWorkDimY,
+                 kBlockTileDimK, kNumOfThreads><<<grid, block>>>(d_A, d_B, d_C, m, n, k);
+}
+```
