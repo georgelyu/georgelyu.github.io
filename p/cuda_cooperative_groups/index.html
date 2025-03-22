@@ -1,0 +1,171 @@
+<!doctype html><html lang=zh-cn dir=ltr><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><meta name=description content="更方便、细粒度的线程协作"><title>《Cooperative Groups Flexible CUDA Thread Programming》笔记</title>
+<link rel=canonical href=https://georgelyu.github.io/p/cuda_cooperative_groups/><link rel=stylesheet href=/scss/style.min.663803bebe609202d5b39d848f2d7c2dc8b598a2d879efa079fa88893d29c49c.css><meta property='og:title' content="《Cooperative Groups Flexible CUDA Thread Programming》笔记"><meta property='og:description' content="更方便、细粒度的线程协作"><meta property='og:url' content='https://georgelyu.github.io/p/cuda_cooperative_groups/'><meta property='og:site_name' content='吕超阳的博客'><meta property='og:type' content='article'><meta property='article:section' content='Post'><meta property='article:published_time' content='2025-03-04T14:26:36+08:00'><meta property='article:modified_time' content='2025-03-04T14:26:36+08:00'><meta name=twitter:title content="《Cooperative Groups Flexible CUDA Thread Programming》笔记"><meta name=twitter:description content="更方便、细粒度的线程协作"><link rel="shortcut icon" href=/favicon.png></head><body class=article-page><script>(function(){const e="StackColorScheme";localStorage.getItem(e)||localStorage.setItem(e,"auto")})()</script><script>(function(){const t="StackColorScheme",e=localStorage.getItem(t),n=window.matchMedia("(prefers-color-scheme: dark)").matches===!0;e=="dark"||e==="auto"&&n?document.documentElement.dataset.scheme="dark":document.documentElement.dataset.scheme="light"})()</script><div class="container main-container flex on-phone--column extended"><aside class="sidebar left-sidebar sticky"><button class="hamburger hamburger--spin" type=button id=toggle-menu aria-label=切换菜单>
+<span class=hamburger-box><span class=hamburger-inner></span></span></button><header><figure class=site-avatar><a href=/><img src=/img/avatar_hu_c68a00bbf16dac8.png width=300 height=300 class=site-logo loading=lazy alt=Avatar></a></figure><div class=site-meta><h1 class=site-name><a href=/>吕超阳的博客</a></h1><h2 class=site-description>写点想写的东西。</h2></div></header><ol class=menu id=main-menu><li><a href=/><svg class="icon icon-tabler icon-tabler-home" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><polyline points="5 12 3 12 12 3 21 12 19 12"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/><path d="M9 21v-6a2 2 0 012-2h2a2 2 0 012 2v6"/></svg>
+<span>主页</span></a></li><li><a href=/archives/><svg class="icon icon-tabler icon-tabler-archive" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><rect x="3" y="4" width="18" height="4" rx="2"/><path d="M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+<span>存档</span></a></li><li><a href=/search/><svg class="icon icon-tabler icon-tabler-search" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/></svg>
+<span>搜索</span></a></li><li class=menu-bottom-section><ol class=menu><li id=dark-mode-toggle><svg class="icon icon-tabler icon-tabler-toggle-left" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="8" cy="12" r="2"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg>
+<svg class="icon icon-tabler icon-tabler-toggle-right" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="16" cy="12" r="2"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg>
+<span>暗色模式</span></li></ol></li></ol></aside><aside class="sidebar right-sidebar sticky"><section class="widget archives"><div class=widget-icon><svg class="icon icon-tabler icon-tabler-hash" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><line x1="5" y1="9" x2="19" y2="9"/><line x1="5" y1="15" x2="19" y2="15"/><line x1="11" y1="4" x2="7" y2="20"/><line x1="17" y1="4" x2="13" y2="20"/></svg></div><h2 class="widget-title section-title">目录</h2><div class=widget--toc><nav id=TableOfContents><ol><li><a href=#动机>动机</a></li><li><a href=#cooperative-groups-基础>Cooperative Groups 基础</a></li><li><a href=#创建-group>创建 group</a></li><li><a href=#针对-warp-的优化>针对 warp 的优化</a><ol><li><a href=#对齐到-warp-大小>对齐到 warp 大小</a></li><li><a href=#使用-warp-level-指令>使用 warp level 指令</a></li></ol></li></ol></nav></div></section></aside><main class="main full-width"><article class=main-article><header class=article-header><div class=article-details><header class=article-category><a href=/categories/cuda/>CUDA</a></header><div class=article-title-wrapper><h2 class=article-title><a href=/p/cuda_cooperative_groups/>《Cooperative Groups Flexible CUDA Thread Programming》笔记</a></h2><h3 class=article-subtitle>更方便、细粒度的线程协作</h3></div><footer class=article-time><div><svg class="icon icon-tabler icon-tabler-calendar-time" width="56" height="56" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><path d="M11.795 21H5a2 2 0 01-2-2V7a2 2 0 012-2h12a2 2 0 012 2v4"/><circle cx="18" cy="18" r="4"/><path d="M15 3v4"/><path d="M7 3v4"/><path d="M3 11h16"/><path d="M18 16.496V18l1 1"/></svg>
+<time class=article-time--published>2025 年 3 月 4 日</time></div></footer></div></header><section class=article-content><p>这是<a class=link href=https://developer.nvidia.com/blog/cooperative-groups/ target=_blank rel=noopener>《Cooperative Groups: Flexible CUDA Thread Programming》</a>这篇博客的学习笔记。</p><h2 id=动机>动机</h2><p>在 CUDA 中线程之间分享数据和协作工作是非常常见的。CUDA 为此提供了一个同步函数 <code>__syncthreads()</code>，但是这个函数只能在 block 间同步。有时我们会需要更细粒度的线程协作。</p><p>所以 CUDA 推出了 Cooperative Groups programming model，这可以认为是原先 CUDA programming model 的一个扩展。</p><h2 id=cooperative-groups-基础>Cooperative Groups 基础</h2><p>使用 Cooperative Groups 需要加头文件 <code>#include &lt;cooperative_groups.h></code>，并且所有的命名都在 <code>cooperative_groups::</code> 命名空间下。</p><p>Cooperative Groups 中的基础类型是 <code>thread_group</code>，这是一个指向一组线程的 handle，这个 handle 只能被该组的线程访问。一个 group 有一些简单的接口，如 <code>unsigned size()</code> 来查询 group 内的线程数量，<code>unsigned thread_rank()</code> 来查询当前线程在 group 中的 id（在 <code>0</code> 到 <code>size() - 1</code> 之间）等。</p><p>对于一个 group，可以用下面的语句来同步。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=n>g</span><span class=p>.</span><span class=n>sync</span><span class=p>();</span>           <span class=c1>// synchronize group g
+</span></span></span><span class=line><span class=cl><span class=c1></span><span class=n>cg</span><span class=o>::</span><span class=n>synchronize</span><span class=p>(</span><span class=n>g</span><span class=p>);</span> <span class=c1>// an equivalent way to synchronize g
+</span></span></span></code></pre></td></tr></table></div></div><h2 id=创建-group>创建 group</h2><p>很显然，我们不用自己创建，block 本身就符合一个 group 概念。所以我们可以通过</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=n>thread_block</span> <span class=n>block</span> <span class=o>=</span> <span class=n>this_thread_block</span><span class=p>();</span>
+</span></span></code></pre></td></tr></table></div></div><p>来拿到指向该 block 的 handle。我们对这个 group 同步的话就和之前的 <code>__syncthreads()</code> 是一样的，所以下面的所有语句作用是相同的。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl><span class=n>block</span><span class=p>.</span><span class=n>sync</span><span class=p>();</span>
+</span></span><span class=line><span class=cl><span class=n>cg</span><span class=o>::</span><span class=n>synchronize</span><span class=p>(</span><span class=n>block</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=n>this_thread_block</span><span class=p>().</span><span class=n>sync</span><span class=p>();</span>
+</span></span><span class=line><span class=cl><span class=n>cg</span><span class=o>::</span><span class=n>synchronize</span><span class=p>(</span><span class=n>this_thread_block</span><span class=p>());</span>
+</span></span></code></pre></td></tr></table></div></div><p><code>thread_block</code> 相比上面的 <code>thread_group</code>，多了</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=n>dim3</span> <span class=nf>group_index</span><span class=p>();</span>  <span class=c1>// 3-dimensional block index within the grid
+</span></span></span><span class=line><span class=cl><span class=c1></span><span class=n>dim3</span> <span class=nf>thread_index</span><span class=p>();</span> <span class=c1>// 3-dimensional thread index within the block
+</span></span></span></code></pre></td></tr></table></div></div><p>这两个值，等同于先前的 <code>blockIdx</code> 和 <code>threadIdx</code>。</p><p>想要把 group 继续细分，则可以使用 <code>cg::tiled_partition()</code> 函数，如我们可以用下面的代码把整个 block 分为 32 个线程的块，然后再分为 4 个线程一组的块：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=n>thread_group</span> <span class=n>tile32</span> <span class=o>=</span> <span class=n>cg</span><span class=o>::</span><span class=n>tiled_partition</span><span class=p>(</span><span class=n>this_thread_block</span><span class=p>(),</span> <span class=mi>32</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=n>thread_group</span> <span class=n>tile4</span> <span class=o>=</span> <span class=n>tiled_partition</span><span class=p>(</span><span class=n>tile32</span><span class=p>,</span> <span class=mi>4</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>下面是一个 reduce sum 的例子：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=lnt>48
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=cp>#include</span> <span class=cpf>&lt;cooperative_groups.h&gt;</span><span class=cp>
+</span></span></span><span class=line><span class=cl><span class=cp></span>
+</span></span><span class=line><span class=cl><span class=k>using</span> <span class=k>namespace</span> <span class=n>cooperative_groups</span><span class=p>;</span>
+</span></span><span class=line><span class=cl><span class=n>__device__</span> <span class=kt>int</span> <span class=nf>reduce_sum</span><span class=p>(</span><span class=n>thread_group</span> <span class=n>g</span><span class=p>,</span> <span class=kt>int</span> <span class=o>*</span><span class=n>temp</span><span class=p>,</span> <span class=kt>int</span> <span class=n>val</span><span class=p>)</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=kt>int</span> <span class=n>lane</span> <span class=o>=</span> <span class=n>g</span><span class=p>.</span><span class=n>thread_rank</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=c1>// Each iteration halves the number of active threads
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=c1>// Each thread adds its partial sum[i] to sum[lane+i]
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>g</span><span class=p>.</span><span class=n>size</span><span class=p>()</span> <span class=o>/</span> <span class=mi>2</span><span class=p>;</span> <span class=n>i</span> <span class=o>&gt;</span> <span class=mi>0</span><span class=p>;</span> <span class=n>i</span> <span class=o>/=</span> <span class=mi>2</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>    <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=n>temp</span><span class=p>[</span><span class=n>lane</span><span class=p>]</span> <span class=o>=</span> <span class=n>val</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=n>g</span><span class=p>.</span><span class=n>sync</span><span class=p>();</span> <span class=c1>// wait for all threads to store
+</span></span></span><span class=line><span class=cl><span class=c1></span>        <span class=k>if</span><span class=p>(</span><span class=n>lane</span><span class=o>&lt;</span><span class=n>i</span><span class=p>)</span> <span class=n>val</span> <span class=o>+=</span> <span class=n>temp</span><span class=p>[</span><span class=n>lane</span> <span class=o>+</span> <span class=n>i</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>        <span class=n>g</span><span class=p>.</span><span class=n>sync</span><span class=p>();</span> <span class=c1>// wait for all threads to load
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=k>return</span> <span class=n>val</span><span class=p>;</span> <span class=c1>// note: only thread 0 will return full sum
+</span></span></span><span class=line><span class=cl><span class=c1></span><span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=n>__device__</span> <span class=kt>int</span> <span class=nf>thread_sum</span><span class=p>(</span><span class=kt>int</span> <span class=o>*</span><span class=n>input</span><span class=p>,</span> <span class=kt>int</span> <span class=n>n</span><span class=p>)</span> 
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=kt>int</span> <span class=n>sum</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=k>for</span><span class=p>(</span><span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>blockIdx</span><span class=p>.</span><span class=n>x</span> <span class=o>*</span> <span class=n>blockDim</span><span class=p>.</span><span class=n>x</span> <span class=o>+</span> <span class=n>threadIdx</span><span class=p>.</span><span class=n>x</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=n>i</span> <span class=o>&lt;</span> <span class=n>n</span> <span class=o>/</span> <span class=mi>4</span><span class=p>;</span> 
+</span></span><span class=line><span class=cl>        <span class=n>i</span> <span class=o>+=</span> <span class=n>blockDim</span><span class=p>.</span><span class=n>x</span> <span class=o>*</span> <span class=n>gridDim</span><span class=p>.</span><span class=n>x</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>    <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=n>int4</span> <span class=n>in</span> <span class=o>=</span> <span class=p>((</span><span class=n>int4</span><span class=o>*</span><span class=p>)</span><span class=n>input</span><span class=p>)[</span><span class=n>i</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>        <span class=n>sum</span> <span class=o>+=</span> <span class=n>in</span><span class=p>.</span><span class=n>x</span> <span class=o>+</span> <span class=n>in</span><span class=p>.</span><span class=n>y</span> <span class=o>+</span> <span class=n>in</span><span class=p>.</span><span class=n>z</span> <span class=o>+</span> <span class=n>in</span><span class=p>.</span><span class=n>w</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=k>return</span> <span class=n>sum</span><span class=p>;</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=n>__global__</span> <span class=kt>void</span> <span class=nf>sum_kernel_32</span><span class=p>(</span><span class=kt>int</span> <span class=o>*</span><span class=n>sum</span><span class=p>,</span> <span class=kt>int</span> <span class=o>*</span><span class=n>input</span><span class=p>,</span> <span class=kt>int</span> <span class=n>n</span><span class=p>)</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=kt>int</span> <span class=n>my_sum</span> <span class=o>=</span> <span class=n>thread_sum</span><span class=p>(</span><span class=n>input</span><span class=p>,</span> <span class=n>n</span><span class=p>);</span> 
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=k>extern</span> <span class=n>__shared__</span> <span class=kt>int</span> <span class=n>temp</span><span class=p>[];</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=k>auto</span> <span class=n>g</span> <span class=o>=</span> <span class=n>this_thread_block</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>    <span class=k>auto</span> <span class=n>tileIdx</span> <span class=o>=</span> <span class=n>g</span><span class=p>.</span><span class=n>thread_rank</span><span class=p>()</span> <span class=o>/</span> <span class=mi>32</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=kt>int</span><span class=o>*</span> <span class=n>t</span> <span class=o>=</span> <span class=o>&amp;</span><span class=n>temp</span><span class=p>[</span><span class=mi>32</span> <span class=o>*</span> <span class=n>tileIdx</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>    
+</span></span><span class=line><span class=cl>    <span class=k>auto</span> <span class=n>tile32</span> <span class=o>=</span> <span class=n>tiled_partition</span><span class=p>(</span><span class=n>g</span><span class=p>,</span> <span class=mi>32</span><span class=p>);</span>  
+</span></span><span class=line><span class=cl>    <span class=kt>int</span> <span class=n>tile_sum</span> <span class=o>=</span> <span class=n>reduce_sum</span><span class=p>(</span><span class=n>tile32</span><span class=p>,</span> <span class=n>t</span><span class=p>,</span> <span class=n>my_sum</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=k>if</span> <span class=p>(</span><span class=n>tile32</span><span class=p>.</span><span class=n>thread_rank</span><span class=p>()</span> <span class=o>==</span> <span class=mi>0</span><span class=p>)</span> <span class=n>atomicAdd</span><span class=p>(</span><span class=n>sum</span><span class=p>,</span> <span class=n>tile_sum</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p>同时，对于 warp 来说，一个 warp 内的线程可能会发生 diverge，即 warp divergence。这时 SM 会用 active masks 来屏蔽没有激活的线程。而 Cooperative Groups 提供了 <code>coalesced_threads()</code> 函数来创建一个 coalesced threads group。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span><span class=lnt>6
+</span><span class=lnt>7
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=k>auto</span> <span class=n>block</span> <span class=o>=</span> <span class=n>this_thread_block</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=k>if</span> <span class=p>(</span><span class=n>block</span><span class=p>.</span><span class=n>thread_rank</span><span class=p>()</span> <span class=o>%</span> <span class=mi>2</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=n>coalesced_group</span> <span class=n>active</span> <span class=o>=</span> <span class=n>coalesced_threads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>    <span class=p>...</span>
+</span></span><span class=line><span class=cl>    <span class=n>active</span><span class=p>.</span><span class=n>sync</span><span class=p>();</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p>很显然，最大的 coalesced threads group 就是一整个 warp。</p><h2 id=针对-warp-的优化>针对 warp 的优化</h2><h3 id=对齐到-warp-大小>对齐到 warp 大小</h3><p>我们可以把 group size 写到模板参数里，使用静态的 group 定义，这样 thread 的大小就在编译时已知了：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=n>thread_block_tile</span><span class=o>&lt;</span><span class=mi>32</span><span class=o>&gt;</span> <span class=n>tile32</span> <span class=o>=</span> <span class=n>tiled_partition</span><span class=o>&lt;</span><span class=mi>32</span><span class=o>&gt;</span><span class=p>(</span><span class=n>this_thread_block</span><span class=p>());</span>
+</span></span><span class=line><span class=cl><span class=n>thread_block_tile</span><span class=o>&lt;</span><span class=mi>4</span><span class=o>&gt;</span>  <span class=n>tile4</span>  <span class=o>=</span> <span class=n>tiled_partition</span><span class=o>&lt;</span><span class=mi>4</span><span class=o>&gt;</span> <span class=p>(</span><span class=n>this_thread_block</span><span class=p>());</span>
+</span></span></code></pre></td></tr></table></div></div><p>虽然我们可以随便定 group 的大小，但是当我们把 size 定到 warp 大小时，编译器会把同步做到 warp level，效率更高。</p><h3 id=使用-warp-level-指令>使用 warp level 指令</h3><p>同时我们可以使用下面的 warp level 指令来提速：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span><span class=lnt>6
+</span><span class=lnt>7
+</span><span class=lnt>8
+</span><span class=lnt>9
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=p>.</span><span class=n>shfl</span><span class=p>()</span>
+</span></span><span class=line><span class=cl><span class=p>.</span><span class=n>shfl_down</span><span class=p>()</span>
+</span></span><span class=line><span class=cl><span class=p>.</span><span class=n>shfl_up</span><span class=p>()</span>
+</span></span><span class=line><span class=cl><span class=p>.</span><span class=n>shfl_xor</span><span class=p>()</span>
+</span></span><span class=line><span class=cl><span class=p>.</span><span class=n>any</span><span class=p>()</span>
+</span></span><span class=line><span class=cl><span class=p>.</span><span class=n>all</span><span class=p>()</span>
+</span></span><span class=line><span class=cl><span class=p>.</span><span class=n>ballot</span><span class=p>()</span>
+</span></span><span class=line><span class=cl><span class=p>.</span><span class=n>match_any</span><span class=p>()</span>
+</span></span><span class=line><span class=cl><span class=p>.</span><span class=n>match_all</span><span class=p>()</span>
+</span></span></code></pre></td></tr></table></div></div></section><footer class=article-footer></footer><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css integrity=sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV crossorigin=anonymous><script src=https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js integrity=sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8 crossorigin=anonymous defer></script><script src=https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js integrity=sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05 crossorigin=anonymous defer></script><script>window.addEventListener("DOMContentLoaded",()=>{const e=document.querySelector(".main-article");renderMathInElement(e,{delimiters:[{left:"$$",right:"$$",display:!0},{left:"$",right:"$",display:!1},{left:"\\(",right:"\\)",display:!1},{left:"\\[",right:"\\]",display:!0}],ignoredClasses:["gist"]})})</script></article><aside class=related-content--wrapper><h2 class=section-title>相关文章</h2><div class=related-content><div class="flex article-list--tile"><article><a href=/p/cuda_softmax_opt/><div class=article-details><h2 class=article-title>CUDA Softmax 优化</h2></div></a></article><article><a href=/p/cuda_bank_conflict/><div class=article-details><h2 class=article-title>CUDA Bank Conflict 的解决方法</h2></div></a></article><article><a href=/p/lower_occupancy_note/><div class=article-details><h2 class=article-title>《Better Performance at Lower Occupancy》笔记</h2></div></a></article><article><a href=/p/cuda_gemm_opt/><div class=article-details><h2 class=article-title>CUDA GEMM 优化</h2></div></a></article></div></div></aside><footer class=site-footer><section class=copyright>&copy;
+2025 吕超阳的博客</section><section class=powerby>使用 <a href=https://gohugo.io/ target=_blank rel=noopener>Hugo</a> 构建<br>主题 <b><a href=https://github.com/CaiJimmy/hugo-theme-stack target=_blank rel=noopener data-version=3.30.0>Stack</a></b> 由 <a href=https://jimmycai.com target=_blank rel=noopener>Jimmy</a> 设计</section></footer><div class=pswp tabindex=-1 role=dialog aria-hidden=true><div class=pswp__bg></div><div class=pswp__scroll-wrap><div class=pswp__container><div class=pswp__item></div><div class=pswp__item></div><div class=pswp__item></div></div><div class="pswp__ui pswp__ui--hidden"><div class=pswp__top-bar><div class=pswp__counter></div><button class="pswp__button pswp__button--close" title="Close (Esc)"></button>
+<button class="pswp__button pswp__button--share" title=Share></button>
+<button class="pswp__button pswp__button--fs" title="Toggle fullscreen"></button>
+<button class="pswp__button pswp__button--zoom" title="Zoom in/out"></button><div class=pswp__preloader><div class=pswp__preloader__icn><div class=pswp__preloader__cut><div class=pswp__preloader__donut></div></div></div></div></div><div class="pswp__share-modal pswp__share-modal--hidden pswp__single-tap"><div class=pswp__share-tooltip></div></div><button class="pswp__button pswp__button--arrow--left" title="Previous (arrow left)">
+</button>
+<button class="pswp__button pswp__button--arrow--right" title="Next (arrow right)"></button><div class=pswp__caption><div class=pswp__caption__center></div></div></div></div></div><script src=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.js integrity="sha256-ePwmChbbvXbsO02lbM3HoHbSHTHFAeChekF1xKJdleo=" crossorigin=anonymous defer></script><script src=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe-ui-default.min.js integrity="sha256-UKkzOn/w1mBxRmLLGrSeyB4e1xbrp4xylgAWb3M42pU=" crossorigin=anonymous defer></script><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/default-skin/default-skin.min.css crossorigin=anonymous><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.css crossorigin=anonymous></main></div><script src=https://cdn.jsdelivr.net/npm/node-vibrant@3.1.6/dist/vibrant.min.js integrity="sha256-awcR2jno4kI5X0zL8ex0vi2z+KMkF24hUW8WePSA9HM=" crossorigin=anonymous></script><script type=text/javascript src=/ts/main.1e9a3bafd846ced4c345d084b355fb8c7bae75701c338f8a1f8a82c780137826.js defer></script><script>(function(){const e=document.createElement("link");e.href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap",e.type="text/css",e.rel="stylesheet",document.head.appendChild(e)})()</script></body></html>
