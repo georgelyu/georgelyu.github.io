@@ -1,0 +1,589 @@
+<!doctype html><html lang=zh-cn dir=ltr><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><meta name=description content="CUDA softmax 函数的一步步优化指南"><title>CUDA Softmax 优化</title>
+<link rel=canonical href=https://georgelyu.github.io/p/cuda_softmax_opt/><link rel=stylesheet href=/scss/style.min.663803bebe609202d5b39d848f2d7c2dc8b598a2d879efa079fa88893d29c49c.css><meta property='og:title' content="CUDA Softmax 优化"><meta property='og:description' content="CUDA softmax 函数的一步步优化指南"><meta property='og:url' content='https://georgelyu.github.io/p/cuda_softmax_opt/'><meta property='og:site_name' content='吕超阳的博客'><meta property='og:type' content='article'><meta property='article:section' content='Post'><meta property='article:published_time' content='2025-03-14T14:57:27+08:00'><meta property='article:modified_time' content='2025-03-14T14:57:27+08:00'><meta name=twitter:title content="CUDA Softmax 优化"><meta name=twitter:description content="CUDA softmax 函数的一步步优化指南"><link rel="shortcut icon" href=/favicon.png></head><body class=article-page><script>(function(){const e="StackColorScheme";localStorage.getItem(e)||localStorage.setItem(e,"auto")})()</script><script>(function(){const t="StackColorScheme",e=localStorage.getItem(t),n=window.matchMedia("(prefers-color-scheme: dark)").matches===!0;e=="dark"||e==="auto"&&n?document.documentElement.dataset.scheme="dark":document.documentElement.dataset.scheme="light"})()</script><div class="container main-container flex on-phone--column extended"><aside class="sidebar left-sidebar sticky"><button class="hamburger hamburger--spin" type=button id=toggle-menu aria-label=切换菜单>
+<span class=hamburger-box><span class=hamburger-inner></span></span></button><header><figure class=site-avatar><a href=/><img src=/img/avatar_hu_c68a00bbf16dac8.png width=300 height=300 class=site-logo loading=lazy alt=Avatar></a></figure><div class=site-meta><h1 class=site-name><a href=/>吕超阳的博客</a></h1><h2 class=site-description>写点想写的东西。</h2></div></header><ol class=menu id=main-menu><li><a href=/><svg class="icon icon-tabler icon-tabler-home" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><polyline points="5 12 3 12 12 3 21 12 19 12"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/><path d="M9 21v-6a2 2 0 012-2h2a2 2 0 012 2v6"/></svg>
+<span>主页</span></a></li><li><a href=/archives/><svg class="icon icon-tabler icon-tabler-archive" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><rect x="3" y="4" width="18" height="4" rx="2"/><path d="M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+<span>存档</span></a></li><li><a href=/search/><svg class="icon icon-tabler icon-tabler-search" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/></svg>
+<span>搜索</span></a></li><li class=menu-bottom-section><ol class=menu><li id=dark-mode-toggle><svg class="icon icon-tabler icon-tabler-toggle-left" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="8" cy="12" r="2"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg>
+<svg class="icon icon-tabler icon-tabler-toggle-right" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="16" cy="12" r="2"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg>
+<span>暗色模式</span></li></ol></li></ol></aside><aside class="sidebar right-sidebar sticky"><section class="widget archives"><div class=widget-icon><svg class="icon icon-tabler icon-tabler-hash" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><line x1="5" y1="9" x2="19" y2="9"/><line x1="5" y1="15" x2="19" y2="15"/><line x1="11" y1="4" x2="7" y2="20"/><line x1="17" y1="4" x2="13" y2="20"/></svg></div><h2 class="widget-title section-title">目录</h2><div class=widget--toc><nav id=TableOfContents><ol><li><a href=#softmax-的定义>Softmax 的定义</a></li><li><a href=#第一版实现naive>第一版实现：naive</a></li><li><a href=#第二版实现online-softmax>第二版实现：online softmax</a></li><li><a href=#第三版实现使用并行-reduction>第三版实现：使用并行 reduction</a></li><li><a href=#第四版实现warp-level-reduction>第四版实现：warp-level reduction</a></li></ol></nav></div></section></aside><main class="main full-width"><article class=main-article><header class=article-header><div class=article-details><header class=article-category><a href=/categories/cuda/>CUDA</a></header><div class=article-title-wrapper><h2 class=article-title><a href=/p/cuda_softmax_opt/>CUDA Softmax 优化</a></h2><h3 class=article-subtitle>CUDA softmax 函数的一步步优化指南</h3></div><footer class=article-time><div><svg class="icon icon-tabler icon-tabler-calendar-time" width="56" height="56" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><path d="M11.795 21H5a2 2 0 01-2-2V7a2 2 0 012-2h12a2 2 0 012 2v4"/><circle cx="18" cy="18" r="4"/><path d="M15 3v4"/><path d="M7 3v4"/><path d="M3 11h16"/><path d="M18 16.496V18l1 1"/></svg>
+<time class=article-time--published>2025 年 3 月 14 日</time></div></footer></div></header><section class=article-content><p>在这里记录一下关于 softmax 函数的 CUDA 实现的优化，基本翻译自 Maharshi Pandya 的 <a class=link href=https://maharshi.bearblog.dev/optimizing-softmax-cuda/ target=_blank rel=noopener>Learning CUDA by optimizing softmax: A worklog</a> 这篇博客。</p><h2 id=softmax-的定义>Softmax 的定义</h2><p>Softmax 函数的输入是一个有 $N$ 个元素的数组 $X = \{ x_i \}$，输出是同样的一个有 N 个元素的数组 $O = \{ o_i \}$，第 $i$ 个输出元素 $o_i$ 的定义如下：</p>$$ o_i = \frac{e^{x_i}}{\sum_{k = 0}^{N - 1} e^{x_k}}. $$<p>这里能看到对于每个输入元素 $x_i$，在计算时除了其自身的值，主要还需要一个所有元素的指数和。</p><p>但是这里有一个问题，就是 $e^x$ 在 $x$ 较小时会很快地趋向于 0，在 $x$ 较大时则会很快地爆炸性增长。这对于浮点数的表示精度来说非常不好，即我们在使用 float 进行计算，且当 $x$ 有比较极端的值时，上面定义的 softmax 函数数值上并不稳定（分别会发生下溢和上溢）。</p><p>举例来说，对于 $X = \{3, 1, -3\}$，我们直接计算可以得到结果 \O = {0.88, 0.12, 0\}。但是对于 $X = \{1000, 1000, 1000\}$，我们会得到 -nan，因为使用 float 表示时，<code>exp(1000) = inf</code>。同理对于 $X = \{-1000, -1000, -1000\}$ 也是一样的会得到 -nan，因为 <code>-exp(1000) = 0</code>。</p><p>所以我们可以定义一个修改的 softmax 函数：把每个输入元素 $x_i$ 先减去数组中的最大值，即</p>$$ o_i = \frac{e^{x_i-x_{max}}}{\sum_{k = 0}^{N - 1} e^{x_k-x_{max}}}. $$<p>这样做的好处是保证了指数最大不会超过 0，所以不会发生上溢出（即不会得到 inf）。下溢出即使发生也没关系，下溢出的值被视为 0 不会影响我们得到一个合理的值。</p><p>当然最后我们证明一下，我们修改过的版本和之前是等价的：</p>$$ \begin{split} \frac{e^{x_i-x_{max}}}{\sum_{k = 0}^{N - 1} e^{x_k-x_{max}}} &= \frac{e^{-x_{max}} \cdot e^{x_i}}{e^{-x_{max}} \cdot \sum_{k = 0}^{N - 1} e^{x_k}} \\ &= \frac{e^{x_i}}{\sum_{k = 0}^{N - 1} e^{x_k}} \end{split} .$$<p>接下来我们在计算时都会使用这个经过修改的版本。</p><p>通常，在计算时，我们不会只对一个数组计算 softmax，而是对多个数组同时计算。我们假设有 $M$ 个这样的数组，每个数组有 $N$ 个元素，则我们有一个 $M \times N$ 的矩阵作为输入，同时我们的输出也是一个 $M \times N$ 的矩阵。</p><h2 id=第一版实现naive>第一版实现：naive</h2><p>接下来我们进行 CUDA 的实现。我们首先令一个线程处理一行数据，即对于一个数组进行一个串行的实现。这时我们需要三轮计算，因为每一轮都依赖于上一轮得到的结果：</p><ol><li>计算 $x_{max}$；</li><li>计算 $\norm = \sum_{k = 0}^{N - 1} e^{x_k-x_{max}}$；</li><li>计算 $o_i = \frac{e^{x_i-x_{max}}}{norm}$。</li></ol><p>代码如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=k>template</span> <span class=o>&lt;</span><span class=kt>int</span> <span class=n>kBlockDim</span><span class=o>&gt;</span>
+</span></span><span class=line><span class=cl><span class=n>__global__</span> <span class=kt>void</span> <span class=n>MySoftMaxKernel</span><span class=p>(</span><span class=kt>float</span><span class=o>*</span> <span class=n>d_X</span><span class=p>,</span> <span class=kt>float</span><span class=o>*</span> <span class=n>d_O</span><span class=p>,</span> <span class=kt>int</span> <span class=n>M</span><span class=p>,</span> <span class=kt>int</span> <span class=n>N</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=kt>int</span> <span class=n>row</span> <span class=o>=</span> <span class=n>blockIdx</span><span class=p>.</span><span class=n>x</span> <span class=o>*</span> <span class=n>kBlockDim</span> <span class=o>+</span> <span class=n>threadIdx</span><span class=p>.</span><span class=n>x</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=k>if</span> <span class=p>(</span><span class=n>row</span> <span class=o>&lt;</span> <span class=n>M</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=c1>// max
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=kt>float</span> <span class=n>m</span> <span class=o>=</span> <span class=o>-</span><span class=mi>1</span> <span class=o>*</span> <span class=n>INFINITY</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=c1>// norm factor
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=kt>float</span> <span class=n>L</span> <span class=o>=</span> <span class=mf>0.0f</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=c1>// 3 passes (not optimal)
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>col</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span> <span class=n>col</span> <span class=o>&lt;</span> <span class=n>N</span><span class=p>;</span> <span class=n>col</span><span class=o>++</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>row</span> <span class=o>*</span> <span class=n>N</span> <span class=o>+</span> <span class=n>col</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>      <span class=n>m</span> <span class=o>=</span> <span class=n>max</span><span class=p>(</span><span class=n>m</span><span class=p>,</span> <span class=n>d_X</span><span class=p>[</span><span class=n>i</span><span class=p>]);</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>col</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span> <span class=n>col</span> <span class=o>&lt;</span> <span class=n>N</span><span class=p>;</span> <span class=n>col</span><span class=o>++</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>row</span> <span class=o>*</span> <span class=n>N</span> <span class=o>+</span> <span class=n>col</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>      <span class=n>L</span> <span class=o>+=</span> <span class=n>expf</span><span class=p>(</span><span class=n>d_X</span><span class=p>[</span><span class=n>i</span><span class=p>]</span> <span class=o>-</span> <span class=n>m</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>col</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span> <span class=n>col</span> <span class=o>&lt;</span> <span class=n>N</span><span class=p>;</span> <span class=n>col</span><span class=o>++</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>row</span> <span class=o>*</span> <span class=n>N</span> <span class=o>+</span> <span class=n>col</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>      <span class=n>d_O</span><span class=p>[</span><span class=n>i</span><span class=p>]</span> <span class=o>=</span> <span class=n>expf</span><span class=p>(</span><span class=n>d_X</span><span class=p>[</span><span class=n>i</span><span class=p>]</span> <span class=o>-</span> <span class=n>m</span><span class=p>)</span> <span class=o>/</span> <span class=n>L</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=kt>void</span> <span class=nf>MySoftMax</span><span class=p>(</span><span class=kt>float</span><span class=o>*</span> <span class=n>d_X</span><span class=p>,</span> <span class=kt>float</span><span class=o>*</span> <span class=n>d_O</span><span class=p>,</span> <span class=kt>int</span> <span class=n>kM</span><span class=p>,</span> <span class=kt>int</span> <span class=n>kN</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=k>constexpr</span> <span class=kt>int</span> <span class=n>kBlockDim</span> <span class=o>=</span> <span class=mi>1024</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=n>dim3</span> <span class=n>block</span><span class=p>(</span><span class=n>kBlockDim</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=n>dim3</span> <span class=n>grid</span><span class=p>((</span><span class=n>kM</span> <span class=o>+</span> <span class=n>kBlockDim</span> <span class=o>-</span> <span class=mi>1</span><span class=p>)</span> <span class=o>/</span> <span class=n>kBlockDim</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=n>MySoftMaxKernel</span><span class=o>&lt;</span><span class=n>kBlockDim</span><span class=o>&gt;&lt;&lt;&lt;</span><span class=n>grid</span><span class=p>,</span> <span class=n>block</span><span class=o>&gt;&gt;&gt;</span><span class=p>(</span><span class=n>d_X</span><span class=p>,</span> <span class=n>d_O</span><span class=p>,</span> <span class=n>kM</span><span class=p>,</span> <span class=n>kN</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><h2 id=第二版实现online-softmax>第二版实现：online softmax</h2><p>我们先从算法角度进行一下优化，三轮显然计算有点多了，我们尝试能不能将第一轮（计算 $x_{max}$）和第二轮（计算 $norm$）进行融合。</p><p>因为我们是一个一个处理元素的，在处理过程中，$x_{max}$ 和 $norm$ 会不断地得到更新。我们先处理第一个元素 $x_0$，此时</p><ul><li>$x_{max0} = x_0$</li><li>$norm_0 = e^{(x_0-x_{max0})}$</li></ul><p>这时我们处理下一个元素 $x_1$，如果这个元素比 $x_{max0}$ 小的话，我们就不用修改 $x_{max}$，直接增加 $norm$ 即可，即</p><ul><li>$x_{max1} = x_{max0}$</li><li>$norm_1 = norm_0 + e^{(x_1-x_{max1})}$</li></ul><p>但如果 $x_1$ 比先前的最大值 $x_{max0}$ 大，则之前的 $norm$ 计算是有问题的，必须进行修正（因为 $x_{max}$ 更新了）。</p><p>这时我们对先前的 $norm0$ 乘一个修正项 $e^{(x_{max0} - x_{max1})}$，即可得到修正后的 $cnorm_0 = e^{(x_0-x_{max1})}$。所以这时我们得到了</p><ul><li>$x_{max1} = x_{1}$</li><li>$norm_1 = norm_0 \cdot e^{(x_{max0} - x_{max1})} + e^{(x_1-x_{max1})}$</li></ul><p>实际上这已经变成了一个递推式了，我们将这个递推式写成代码为：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=k>template</span> <span class=o>&lt;</span><span class=kt>int</span> <span class=n>kBlockDim</span><span class=o>&gt;</span>
+</span></span><span class=line><span class=cl><span class=n>__global__</span> <span class=kt>void</span> <span class=n>MySoftMaxKernel</span><span class=p>(</span><span class=kt>float</span><span class=o>*</span> <span class=n>d_X</span><span class=p>,</span> <span class=kt>float</span><span class=o>*</span> <span class=n>d_O</span><span class=p>,</span> <span class=kt>int</span> <span class=n>M</span><span class=p>,</span> <span class=kt>int</span> <span class=n>N</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=kt>int</span> <span class=n>row</span> <span class=o>=</span> <span class=n>blockIdx</span><span class=p>.</span><span class=n>x</span> <span class=o>*</span> <span class=n>kBlockDim</span> <span class=o>+</span> <span class=n>threadIdx</span><span class=p>.</span><span class=n>x</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=k>if</span> <span class=p>(</span><span class=n>row</span> <span class=o>&lt;</span> <span class=n>M</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=kt>float</span> <span class=n>m</span> <span class=o>=</span> <span class=o>-</span><span class=mi>1</span> <span class=o>*</span> <span class=n>INFINITY</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=kt>float</span> <span class=n>L</span> <span class=o>=</span> <span class=mf>0.0f</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=c1>// compute max and norm factor in one pass only
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=c1>// by exploiting the property of exponentials
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>col</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span> <span class=n>col</span> <span class=o>&lt;</span> <span class=n>N</span><span class=p>;</span> <span class=n>col</span><span class=o>++</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>row</span> <span class=o>*</span> <span class=n>N</span> <span class=o>+</span> <span class=n>col</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>      <span class=kt>float</span> <span class=n>curr</span> <span class=o>=</span> <span class=n>d_X</span><span class=p>[</span><span class=n>i</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>      <span class=k>if</span> <span class=p>(</span><span class=n>curr</span> <span class=o>&gt;</span> <span class=n>m</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=c1>// norm needs to be mutiplied by correction term
+</span></span></span><span class=line><span class=cl><span class=c1></span>        <span class=n>L</span> <span class=o>=</span> <span class=n>L</span> <span class=o>*</span> <span class=n>expf</span><span class=p>(</span><span class=n>m</span> <span class=o>-</span> <span class=n>curr</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>        <span class=n>m</span> <span class=o>=</span> <span class=n>curr</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>      <span class=p>}</span>
+</span></span><span class=line><span class=cl>      <span class=n>L</span> <span class=o>+=</span> <span class=n>expf</span><span class=p>(</span><span class=n>curr</span> <span class=o>-</span> <span class=n>m</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>col</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span> <span class=n>col</span> <span class=o>&lt;</span> <span class=n>N</span><span class=p>;</span> <span class=n>col</span><span class=o>++</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>row</span> <span class=o>*</span> <span class=n>N</span> <span class=o>+</span> <span class=n>col</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>      <span class=n>d_O</span><span class=p>[</span><span class=n>i</span><span class=p>]</span> <span class=o>=</span> <span class=n>expf</span><span class=p>(</span><span class=n>d_X</span><span class=p>[</span><span class=n>i</span><span class=p>]</span> <span class=o>-</span> <span class=n>m</span><span class=p>)</span> <span class=o>/</span> <span class=n>L</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=kt>void</span> <span class=nf>MySoftMax</span><span class=p>(</span><span class=kt>float</span><span class=o>*</span> <span class=n>d_X</span><span class=p>,</span> <span class=kt>float</span><span class=o>*</span> <span class=n>d_O</span><span class=p>,</span> <span class=kt>int</span> <span class=n>kM</span><span class=p>,</span> <span class=kt>int</span> <span class=n>kN</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=k>constexpr</span> <span class=kt>int</span> <span class=n>kBlockDim</span> <span class=o>=</span> <span class=mi>1024</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=n>dim3</span> <span class=n>block</span><span class=p>(</span><span class=n>kBlockDim</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=n>dim3</span> <span class=n>grid</span><span class=p>((</span><span class=n>kM</span> <span class=o>+</span> <span class=n>kBlockDim</span> <span class=o>-</span> <span class=mi>1</span><span class=p>)</span> <span class=o>/</span> <span class=n>kBlockDim</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=n>MySoftMaxKernel</span><span class=o>&lt;</span><span class=n>kBlockDim</span><span class=o>&gt;&lt;&lt;&lt;</span><span class=n>grid</span><span class=p>,</span> <span class=n>block</span><span class=o>&gt;&gt;&gt;</span><span class=p>(</span><span class=n>d_X</span><span class=p>,</span> <span class=n>d_O</span><span class=p>,</span> <span class=n>kM</span><span class=p>,</span> <span class=n>kN</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p>这样我们成功地省掉了一次 for 循环。</p><h2 id=第三版实现使用并行-reduction>第三版实现：使用并行 reduction</h2><p>先前的算法虽然节省了一个 for 循环，但显然对于单个数组（$M = 1$）的情况，我们的实现依然是串行的。然而从上面我们 online softmax 的推导可以得到，我们可以对一个数组分段地进行 $x_{max}$ 和 $norm$ 计算，再进行归约（reduce）。（在上面的推导中，我们可以认为是用一个多个元素得到的结果和一个单个元素进行了归约计算，但是这个可以很 trivial 地推广至多个元素和多个元素的归约计算。）</p><p>依据这个精神，我们可以用一个线程进行多个元素的 softmax 计算。为了保证读 global memory 的 coalescence，每个线程跨越 blockDim.x 去进行处理的，即线程 0 处理 {0, blockDim.x, blockDim.x * 2, &mldr;}，线程 1 处理 {1, blockDim.x + 1, blockDim.x * 2 + 1, &mldr;}。</p><p>在每个线程算完自己部分的局部 $x_{max}$ 和 $norm$ 之后，我们需要进行一个并行归约。这个过程每个线程会先把自己的局部结果存至 shared memory 之中，然后进行并行归约，最终结果会存在 <code>smem[0]</code> 之中。（这里我们假设了输入的数据规模用一个 block 就可以完成这个归约。）在对 $x_{max}$ 和 $norm$ 都完成归约之后我们就可以对结果进行并行地计算了。</p><p>参考代码如下。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=lnt>48
+</span><span class=lnt>49
+</span><span class=lnt>50
+</span><span class=lnt>51
+</span><span class=lnt>52
+</span><span class=lnt>53
+</span><span class=lnt>54
+</span><span class=lnt>55
+</span><span class=lnt>56
+</span><span class=lnt>57
+</span><span class=lnt>58
+</span><span class=lnt>59
+</span><span class=lnt>60
+</span><span class=lnt>61
+</span><span class=lnt>62
+</span><span class=lnt>63
+</span><span class=lnt>64
+</span><span class=lnt>65
+</span><span class=lnt>66
+</span><span class=lnt>67
+</span><span class=lnt>68
+</span><span class=lnt>69
+</span><span class=lnt>70
+</span><span class=lnt>71
+</span><span class=lnt>72
+</span><span class=lnt>73
+</span><span class=lnt>74
+</span><span class=lnt>75
+</span><span class=lnt>76
+</span><span class=lnt>77
+</span><span class=lnt>78
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=k>template</span> <span class=o>&lt;</span><span class=kt>int</span> <span class=n>kBlockDim</span><span class=o>&gt;</span>
+</span></span><span class=line><span class=cl><span class=n>__global__</span> <span class=kt>void</span> <span class=n>MySoftMaxKernel</span><span class=p>(</span><span class=kt>float</span><span class=o>*</span> <span class=n>d_X</span><span class=p>,</span> <span class=kt>float</span><span class=o>*</span> <span class=n>d_O</span><span class=p>,</span> <span class=kt>int</span> <span class=n>M</span><span class=p>,</span> <span class=kt>int</span> <span class=n>N</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=c1>// max and norm reduction will happen in shared memory (static)
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=n>__shared__</span> <span class=kt>float</span> <span class=n>smem</span><span class=p>[</span><span class=n>kBlockDim</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=kt>int</span> <span class=n>row</span> <span class=o>=</span> <span class=n>blockIdx</span><span class=p>.</span><span class=n>x</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=kt>int</span> <span class=n>tid</span> <span class=o>=</span> <span class=n>threadIdx</span><span class=p>.</span><span class=n>x</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// edge condition (we don&#39;t process further)
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=k>if</span> <span class=p>(</span><span class=n>row</span> <span class=o>&gt;=</span> <span class=n>M</span><span class=p>)</span> <span class=k>return</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span><span class=o>*</span> <span class=n>input_row</span> <span class=o>=</span> <span class=n>d_X</span> <span class=o>+</span> <span class=n>row</span> <span class=o>*</span> <span class=n>N</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span><span class=o>*</span> <span class=n>output_row</span> <span class=o>=</span> <span class=n>d_O</span> <span class=o>+</span> <span class=n>row</span> <span class=o>*</span> <span class=n>N</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span> <span class=n>local_max</span> <span class=o>=</span> <span class=o>-</span><span class=n>INFINITY</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span> <span class=n>local_norm</span> <span class=o>=</span> <span class=mf>0.0f</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// compute local max and norm for each thread
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// and then finally have a sync barrier before moving on
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>tid</span><span class=p>;</span> <span class=n>i</span> <span class=o>&lt;</span> <span class=n>N</span><span class=p>;</span> <span class=n>i</span> <span class=o>+=</span> <span class=n>kBlockDim</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=kt>float</span> <span class=n>x</span> <span class=o>=</span> <span class=n>input_row</span><span class=p>[</span><span class=n>i</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>    <span class=k>if</span> <span class=p>(</span><span class=n>x</span> <span class=o>&gt;</span> <span class=n>local_max</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=n>local_norm</span> <span class=o>*=</span> <span class=n>expf</span><span class=p>(</span><span class=n>local_max</span> <span class=o>-</span> <span class=n>x</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>      <span class=n>local_max</span> <span class=o>=</span> <span class=n>x</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=n>local_norm</span> <span class=o>+=</span> <span class=n>expf</span><span class=p>(</span><span class=n>x</span> <span class=o>-</span> <span class=n>local_max</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// each thread will have its own local max
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// we store it in the tid of the shared memory
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=n>smem</span><span class=p>[</span><span class=n>tid</span><span class=p>]</span> <span class=o>=</span> <span class=n>local_max</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// block-level reduction in O(log(N)) time over all threads
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// is faster than linear reduction over all threads
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>stride</span> <span class=o>=</span> <span class=n>kBlockDim</span> <span class=o>/</span> <span class=mi>2</span><span class=p>;</span> <span class=n>stride</span> <span class=o>&gt;</span> <span class=mi>0</span><span class=p>;</span> <span class=n>stride</span> <span class=o>/=</span> <span class=mi>2</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>&lt;</span> <span class=n>stride</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=n>smem</span><span class=p>[</span><span class=n>tid</span><span class=p>]</span> <span class=o>=</span> <span class=n>max</span><span class=p>(</span><span class=n>smem</span><span class=p>[</span><span class=n>tid</span><span class=p>],</span> <span class=n>smem</span><span class=p>[</span><span class=n>tid</span> <span class=o>+</span> <span class=n>stride</span><span class=p>]);</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=c1>// sync barrier before next iteration to ensure correctness
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// the first element after max reduction from all threads
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// will contain the global max for the row
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=kt>float</span> <span class=n>row_max</span> <span class=o>=</span> <span class=n>smem</span><span class=p>[</span><span class=mi>0</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// each thread will have its own local norm
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// we will store the corrected local norm in the shared memory
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// again, exploits property of exponentials
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=n>smem</span><span class=p>[</span><span class=n>tid</span><span class=p>]</span> <span class=o>=</span> <span class=n>local_norm</span> <span class=o>*</span> <span class=n>expf</span><span class=p>(</span><span class=n>local_max</span> <span class=o>-</span> <span class=n>row_max</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// sum reduction similar to above for global norm factor
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>stride</span> <span class=o>=</span> <span class=n>kBlockDim</span> <span class=o>/</span> <span class=mi>2</span><span class=p>;</span> <span class=n>stride</span> <span class=o>&gt;</span> <span class=mi>0</span><span class=p>;</span> <span class=n>stride</span> <span class=o>/=</span> <span class=mi>2</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>&lt;</span> <span class=n>stride</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=n>smem</span><span class=p>[</span><span class=n>tid</span><span class=p>]</span> <span class=o>+=</span> <span class=n>smem</span><span class=p>[</span><span class=n>tid</span> <span class=o>+</span> <span class=n>stride</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span> <span class=n>row_norm</span> <span class=o>=</span> <span class=n>smem</span><span class=p>[</span><span class=mi>0</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// finally, compute softmax
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>tid</span><span class=p>;</span> <span class=n>i</span> <span class=o>&lt;</span> <span class=n>N</span><span class=p>;</span> <span class=n>i</span> <span class=o>+=</span> <span class=n>kBlockDim</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=n>output_row</span><span class=p>[</span><span class=n>i</span><span class=p>]</span> <span class=o>=</span> <span class=n>expf</span><span class=p>(</span><span class=n>input_row</span><span class=p>[</span><span class=n>i</span><span class=p>]</span> <span class=o>-</span> <span class=n>row_max</span><span class=p>)</span> <span class=o>/</span> <span class=n>row_norm</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=kt>void</span> <span class=nf>MySoftMax</span><span class=p>(</span><span class=kt>float</span><span class=o>*</span> <span class=n>d_X</span><span class=p>,</span> <span class=kt>float</span><span class=o>*</span> <span class=n>d_O</span><span class=p>,</span> <span class=kt>int</span> <span class=n>kM</span><span class=p>,</span> <span class=kt>int</span> <span class=n>kN</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=k>constexpr</span> <span class=kt>int</span> <span class=n>kBlockDim</span> <span class=o>=</span> <span class=mi>1024</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=n>dim3</span> <span class=n>block</span><span class=p>(</span><span class=n>kBlockDim</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=n>dim3</span> <span class=n>grid</span><span class=p>(</span><span class=n>kM</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=n>MySoftMaxKernel</span><span class=o>&lt;</span><span class=n>kBlockDim</span><span class=o>&gt;&lt;&lt;&lt;</span><span class=n>grid</span><span class=p>,</span> <span class=n>block</span><span class=o>&gt;&gt;&gt;</span><span class=p>(</span><span class=n>d_X</span><span class=p>,</span> <span class=n>d_O</span><span class=p>,</span> <span class=n>kM</span><span class=p>,</span> <span class=n>kN</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><h2 id=第四版实现warp-level-reduction>第四版实现：warp-level reduction</h2><p>我们注意到在上面的 reduction 中，我们使用了很多的 block 级的 <code>__syncthreads()</code>，同时我们还需要使用很多的 shared memory。为了避免这些开销，我们可以使用 warp-level primitives 来完成 reduction。</p><p>这些函数较为通用的写法是这样的：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=cm>/*
+</span></span></span><span class=line><span class=cl><span class=cm>Takes in an array of size `TILE_SIZE` and reduces it as warp-wide sum.
+</span></span></span><span class=line><span class=cl><span class=cm>The first element in the array will contain the reduced sum.
+</span></span></span><span class=line><span class=cl><span class=cm>*/</span>
+</span></span><span class=line><span class=cl><span class=n>__device__</span> <span class=n>__forceinline__</span> <span class=kt>float</span> <span class=nf>warpReduceSum</span><span class=p>(</span><span class=kt>float</span> <span class=n>val</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=k>for</span><span class=p>(</span><span class=kt>int</span> <span class=n>offset</span> <span class=o>=</span> <span class=n>warpSize</span> <span class=o>/</span> <span class=mi>2</span><span class=p>;</span> <span class=n>offset</span> <span class=o>&gt;</span> <span class=mi>0</span><span class=p>;</span> <span class=n>offset</span> <span class=o>/=</span> <span class=mi>2</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=n>val</span> <span class=o>+=</span> <span class=n>__shfl_down_sync</span><span class=p>(</span><span class=mh>0xffffffff</span><span class=p>,</span> <span class=n>val</span><span class=p>,</span> <span class=n>offset</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=k>return</span> <span class=n>val</span><span class=p>;</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=cm>/*
+</span></span></span><span class=line><span class=cl><span class=cm>Takes in an array of size `TILE_SIZE` and reduces it warp-wide max.
+</span></span></span><span class=line><span class=cl><span class=cm>The first element in the array will contain the reduced max.
+</span></span></span><span class=line><span class=cl><span class=cm>*/</span>
+</span></span><span class=line><span class=cl><span class=n>__device__</span> <span class=n>__forceinline__</span> <span class=kt>float</span> <span class=nf>warpReduceMax</span><span class=p>(</span><span class=kt>float</span> <span class=n>val</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>offset</span> <span class=o>=</span> <span class=n>warpSize</span> <span class=o>/</span> <span class=mi>2</span><span class=p>;</span> <span class=n>offset</span> <span class=o>&gt;</span> <span class=mi>0</span><span class=p>;</span> <span class=n>offset</span> <span class=o>/=</span> <span class=mi>2</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=n>val</span> <span class=o>=</span> <span class=n>fmaxf</span><span class=p>(</span><span class=n>val</span><span class=p>,</span> <span class=n>__shfl_down_sync</span><span class=p>(</span><span class=mh>0xffffffff</span><span class=p>,</span> <span class=n>val</span><span class=p>,</span> <span class=n>offset</span><span class=p>));</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p>而在 kernel 中我们只需这样做：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span><span class=lnt>6
+</span><span class=lnt>7
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=kt>float</span> <span class=n>local_max</span> <span class=o>=</span> <span class=p>...;</span>
+</span></span><span class=line><span class=cl><span class=kt>float</span> <span class=n>max_reduce_result</span> <span class=o>=</span> <span class=n>warpReduceMax</span><span class=p>(</span><span class=n>local_max</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=p>...</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=kt>float</span> <span class=n>local_norm</span> <span class=o>=</span> <span class=p>...;</span>
+</span></span><span class=line><span class=cl><span class=kt>float</span> <span class=n>norm_reduce_result</span> <span class=o>=</span> <span class=n>warpReduceSum</span><span class=p>(</span><span class=n>local_norm</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>这样我们就完成了一个 warp 级的 reduction。不过在每个 warp 完成 reduction 之后，最终我们还是要对这些结果再进行一次 reduction。由于 warp-level reduction 的结果存在每个线程 0（warp 中编号）的寄存器中，所以想要让整个 block 拿到这个数据，我们还是要把这个结果放在 shared memory 中，然后再进行 reduction。如果这次的 reduction 的结果小于 32 个的话，我们甚至可以再进行一次 warp-level reduction。这里我们就做了这样的假设，连续使用了 warp-level reduction。</p><p>参考代码如下。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>  1
+</span><span class=lnt>  2
+</span><span class=lnt>  3
+</span><span class=lnt>  4
+</span><span class=lnt>  5
+</span><span class=lnt>  6
+</span><span class=lnt>  7
+</span><span class=lnt>  8
+</span><span class=lnt>  9
+</span><span class=lnt> 10
+</span><span class=lnt> 11
+</span><span class=lnt> 12
+</span><span class=lnt> 13
+</span><span class=lnt> 14
+</span><span class=lnt> 15
+</span><span class=lnt> 16
+</span><span class=lnt> 17
+</span><span class=lnt> 18
+</span><span class=lnt> 19
+</span><span class=lnt> 20
+</span><span class=lnt> 21
+</span><span class=lnt> 22
+</span><span class=lnt> 23
+</span><span class=lnt> 24
+</span><span class=lnt> 25
+</span><span class=lnt> 26
+</span><span class=lnt> 27
+</span><span class=lnt> 28
+</span><span class=lnt> 29
+</span><span class=lnt> 30
+</span><span class=lnt> 31
+</span><span class=lnt> 32
+</span><span class=lnt> 33
+</span><span class=lnt> 34
+</span><span class=lnt> 35
+</span><span class=lnt> 36
+</span><span class=lnt> 37
+</span><span class=lnt> 38
+</span><span class=lnt> 39
+</span><span class=lnt> 40
+</span><span class=lnt> 41
+</span><span class=lnt> 42
+</span><span class=lnt> 43
+</span><span class=lnt> 44
+</span><span class=lnt> 45
+</span><span class=lnt> 46
+</span><span class=lnt> 47
+</span><span class=lnt> 48
+</span><span class=lnt> 49
+</span><span class=lnt> 50
+</span><span class=lnt> 51
+</span><span class=lnt> 52
+</span><span class=lnt> 53
+</span><span class=lnt> 54
+</span><span class=lnt> 55
+</span><span class=lnt> 56
+</span><span class=lnt> 57
+</span><span class=lnt> 58
+</span><span class=lnt> 59
+</span><span class=lnt> 60
+</span><span class=lnt> 61
+</span><span class=lnt> 62
+</span><span class=lnt> 63
+</span><span class=lnt> 64
+</span><span class=lnt> 65
+</span><span class=lnt> 66
+</span><span class=lnt> 67
+</span><span class=lnt> 68
+</span><span class=lnt> 69
+</span><span class=lnt> 70
+</span><span class=lnt> 71
+</span><span class=lnt> 72
+</span><span class=lnt> 73
+</span><span class=lnt> 74
+</span><span class=lnt> 75
+</span><span class=lnt> 76
+</span><span class=lnt> 77
+</span><span class=lnt> 78
+</span><span class=lnt> 79
+</span><span class=lnt> 80
+</span><span class=lnt> 81
+</span><span class=lnt> 82
+</span><span class=lnt> 83
+</span><span class=lnt> 84
+</span><span class=lnt> 85
+</span><span class=lnt> 86
+</span><span class=lnt> 87
+</span><span class=lnt> 88
+</span><span class=lnt> 89
+</span><span class=lnt> 90
+</span><span class=lnt> 91
+</span><span class=lnt> 92
+</span><span class=lnt> 93
+</span><span class=lnt> 94
+</span><span class=lnt> 95
+</span><span class=lnt> 96
+</span><span class=lnt> 97
+</span><span class=lnt> 98
+</span><span class=lnt> 99
+</span><span class=lnt>100
+</span><span class=lnt>101
+</span><span class=lnt>102
+</span><span class=lnt>103
+</span><span class=lnt>104
+</span><span class=lnt>105
+</span><span class=lnt>106
+</span><span class=lnt>107
+</span><span class=lnt>108
+</span><span class=lnt>109
+</span><span class=lnt>110
+</span><span class=lnt>111
+</span><span class=lnt>112
+</span><span class=lnt>113
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c++ data-lang=c++><span class=line><span class=cl><span class=k>template</span> <span class=o>&lt;</span><span class=kt>int</span> <span class=n>kBlockDim</span><span class=o>&gt;</span>
+</span></span><span class=line><span class=cl><span class=n>__global__</span> <span class=kt>void</span> <span class=n>MySoftMaxKernel</span><span class=p>(</span><span class=kt>float</span><span class=o>*</span> <span class=n>d_X</span><span class=p>,</span> <span class=kt>float</span><span class=o>*</span> <span class=n>d_O</span><span class=p>,</span> <span class=kt>int</span> <span class=n>M</span><span class=p>,</span> <span class=kt>int</span> <span class=n>N</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=c1>// number of threads in a warp
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=k>constexpr</span> <span class=kt>int</span> <span class=n>kWarpSize</span> <span class=o>=</span> <span class=mi>32</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// max and norm reduction will happen in shared memory (static)
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=n>__shared__</span> <span class=kt>float</span> <span class=n>smem</span><span class=p>[(</span><span class=n>kBlockDim</span> <span class=o>+</span> <span class=n>kWarpSize</span> <span class=o>-</span> <span class=mi>1</span><span class=p>)</span> <span class=o>/</span> <span class=n>kWarpSize</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=kt>int</span> <span class=n>row</span> <span class=o>=</span> <span class=n>blockIdx</span><span class=p>.</span><span class=n>x</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=kt>int</span> <span class=n>tid</span> <span class=o>=</span> <span class=n>threadIdx</span><span class=p>.</span><span class=n>x</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=k>if</span> <span class=p>(</span><span class=n>row</span> <span class=o>&gt;=</span> <span class=n>M</span><span class=p>)</span> <span class=k>return</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span><span class=o>*</span> <span class=n>input_row</span> <span class=o>=</span> <span class=n>d_X</span> <span class=o>+</span> <span class=n>row</span> <span class=o>*</span> <span class=n>N</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span><span class=o>*</span> <span class=n>output_row</span> <span class=o>=</span> <span class=n>d_O</span> <span class=o>+</span> <span class=n>row</span> <span class=o>*</span> <span class=n>N</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span> <span class=n>local_max</span> <span class=o>=</span> <span class=o>-</span><span class=n>INFINITY</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span> <span class=n>local_norm</span> <span class=o>=</span> <span class=mf>0.0f</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>tid</span><span class=p>;</span> <span class=n>i</span> <span class=o>&lt;</span> <span class=n>N</span><span class=p>;</span> <span class=n>i</span> <span class=o>+=</span> <span class=n>kBlockDim</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=kt>float</span> <span class=n>x</span> <span class=o>=</span> <span class=n>input_row</span><span class=p>[</span><span class=n>i</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>    <span class=k>if</span> <span class=p>(</span><span class=n>x</span> <span class=o>&gt;</span> <span class=n>local_max</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=n>local_norm</span> <span class=o>*=</span> <span class=n>expf</span><span class=p>(</span><span class=n>local_max</span> <span class=o>-</span> <span class=n>x</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>      <span class=n>local_max</span> <span class=o>=</span> <span class=n>x</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=n>local_norm</span> <span class=o>+=</span> <span class=n>expf</span><span class=p>(</span><span class=n>x</span> <span class=o>-</span> <span class=n>local_max</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// warp level reduction using XOR shuffle (&#39;exchanges&#39; the values in the threads)
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// note: if there are 256 threads in one block (8 warps of 32 threads each)
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// the following for loop reduces the value in all the 8 warps
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// the 8 warps contain the 8 maximum values of the 32 threads that reside in those warps
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=kt>float</span> <span class=n>val</span> <span class=o>=</span> <span class=n>local_max</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>offset</span> <span class=o>=</span> <span class=n>kWarpSize</span> <span class=o>/</span> <span class=mi>2</span><span class=p>;</span> <span class=n>offset</span> <span class=o>&gt;</span> <span class=mi>0</span><span class=p>;</span> <span class=n>offset</span> <span class=o>/=</span> <span class=mi>2</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=n>val</span> <span class=o>=</span> <span class=n>fmaxf</span><span class=p>(</span><span class=n>val</span><span class=p>,</span> <span class=n>__shfl_down_sync</span><span class=p>(</span><span class=mh>0xffffffff</span><span class=p>,</span> <span class=n>val</span><span class=p>,</span> <span class=n>offset</span><span class=p>));</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// when blockDim is greater than 32, we need to do a block level reduction
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// AFTER warp level reductions since we have the 8 maximum values that needs to be
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// reduced again the global max will be stored in the first warp
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=k>if</span> <span class=p>(</span><span class=n>kBlockDim</span> <span class=o>&gt;</span> <span class=n>kWarpSize</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>%</span> <span class=n>kWarpSize</span> <span class=o>==</span> <span class=mi>0</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=c1>// which warp are we at?
+</span></span></span><span class=line><span class=cl><span class=c1></span>      <span class=c1>// store the value in its first thread index
+</span></span></span><span class=line><span class=cl><span class=c1></span>      <span class=n>smem</span><span class=p>[</span><span class=n>tid</span> <span class=o>/</span> <span class=n>kWarpSize</span><span class=p>]</span> <span class=o>=</span> <span class=n>val</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=c1>// first warp will do global reduction only
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=c1>// this is possible because we stored the values in the shared memory
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=c1>// so the threads in the first warp will read from it and then reduce
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>&lt;</span> <span class=n>kWarpSize</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=n>val</span> <span class=o>=</span> <span class=p>(</span><span class=n>tid</span> <span class=o>&lt;</span> <span class=n>kBlockDim</span> <span class=o>+</span> <span class=p>(</span><span class=n>kWarpSize</span> <span class=o>-</span> <span class=mi>1</span><span class=p>)</span> <span class=o>/</span> <span class=n>kWarpSize</span><span class=p>)</span> <span class=o>?</span> <span class=n>smem</span><span class=p>[</span><span class=n>tid</span><span class=p>]</span> <span class=o>:</span> <span class=o>-</span><span class=n>INFINITY</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>      <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>offset</span> <span class=o>=</span> <span class=n>kWarpSize</span> <span class=o>/</span> <span class=mi>2</span><span class=p>;</span> <span class=n>offset</span> <span class=o>&gt;</span> <span class=mi>0</span><span class=p>;</span> <span class=n>offset</span> <span class=o>/=</span> <span class=mi>2</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=n>val</span> <span class=o>=</span> <span class=n>fmaxf</span><span class=p>(</span><span class=n>val</span><span class=p>,</span> <span class=n>__shfl_down_sync</span><span class=p>(</span><span class=mh>0xffffffff</span><span class=p>,</span> <span class=n>val</span><span class=p>,</span> <span class=n>offset</span><span class=p>));</span>
+</span></span><span class=line><span class=cl>      <span class=p>}</span>
+</span></span><span class=line><span class=cl>      <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>==</span> <span class=mi>0</span><span class=p>)</span> <span class=n>smem</span><span class=p>[</span><span class=mi>0</span><span class=p>]</span> <span class=o>=</span> <span class=n>val</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span> <span class=k>else</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=c1>// this is for when the number of threads in a block are not
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=c1>// greater than the warp size, in that case we already reduced
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=c1>// so we can store the value
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>==</span> <span class=mi>0</span><span class=p>)</span> <span class=n>smem</span><span class=p>[</span><span class=mi>0</span><span class=p>]</span> <span class=o>=</span> <span class=n>val</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// we got the global row max now
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=kt>float</span> <span class=n>row_max</span> <span class=o>=</span> <span class=n>smem</span><span class=p>[</span><span class=mi>0</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// same reduction algorithm as above, but instead of max reduction
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=c1>// we do a sum reduction i.e. we accumulate the values
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=n>val</span> <span class=o>=</span> <span class=n>local_norm</span> <span class=o>*</span> <span class=n>expf</span><span class=p>(</span><span class=n>local_max</span> <span class=o>-</span> <span class=n>row_max</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>offset</span> <span class=o>=</span> <span class=n>kWarpSize</span> <span class=o>/</span> <span class=mi>2</span><span class=p>;</span> <span class=n>offset</span> <span class=o>&gt;</span> <span class=mi>0</span><span class=p>;</span> <span class=n>offset</span> <span class=o>/=</span> <span class=mi>2</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=n>val</span> <span class=o>+=</span> <span class=n>__shfl_down_sync</span><span class=p>(</span><span class=mh>0xffffffff</span><span class=p>,</span> <span class=n>val</span><span class=p>,</span> <span class=n>offset</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=k>if</span> <span class=p>(</span><span class=n>kBlockDim</span> <span class=o>&gt;</span> <span class=n>kWarpSize</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>%</span> <span class=n>kWarpSize</span> <span class=o>==</span> <span class=mi>0</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=n>smem</span><span class=p>[</span><span class=n>tid</span> <span class=o>/</span> <span class=n>kWarpSize</span><span class=p>]</span> <span class=o>=</span> <span class=n>val</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>    <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=c1>// first warp will do global reduction
+</span></span></span><span class=line><span class=cl><span class=c1></span>    <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>&lt;</span> <span class=n>kWarpSize</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>      <span class=n>val</span> <span class=o>=</span> <span class=p>(</span><span class=n>tid</span> <span class=o>&lt;</span> <span class=n>kBlockDim</span> <span class=o>+</span> <span class=p>(</span><span class=n>kWarpSize</span> <span class=o>-</span> <span class=mi>1</span><span class=p>)</span> <span class=o>/</span> <span class=n>kWarpSize</span><span class=p>)</span> <span class=o>?</span> <span class=n>smem</span><span class=p>[</span><span class=n>tid</span><span class=p>]</span> <span class=o>:</span> <span class=mf>0.0f</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>      <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>offset</span> <span class=o>=</span> <span class=n>kWarpSize</span> <span class=o>/</span> <span class=mi>2</span><span class=p>;</span> <span class=n>offset</span> <span class=o>&gt;</span> <span class=mi>0</span><span class=p>;</span> <span class=n>offset</span> <span class=o>/=</span> <span class=mi>2</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=n>val</span> <span class=o>+=</span> <span class=n>__shfl_down_sync</span><span class=p>(</span><span class=mh>0xffffffff</span><span class=p>,</span> <span class=n>val</span><span class=p>,</span> <span class=n>offset</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>      <span class=p>}</span>
+</span></span><span class=line><span class=cl>      <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>==</span> <span class=mi>0</span><span class=p>)</span> <span class=n>smem</span><span class=p>[</span><span class=mi>0</span><span class=p>]</span> <span class=o>=</span> <span class=n>val</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>    <span class=p>}</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span> <span class=k>else</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=k>if</span> <span class=p>(</span><span class=n>tid</span> <span class=o>==</span> <span class=mi>0</span><span class=p>)</span> <span class=n>smem</span><span class=p>[</span><span class=mi>0</span><span class=p>]</span> <span class=o>=</span> <span class=n>val</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=kt>float</span> <span class=n>row_norm</span> <span class=o>=</span> <span class=n>smem</span><span class=p>[</span><span class=mi>0</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>  <span class=n>__syncthreads</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=c1>// finally, compute softmax
+</span></span></span><span class=line><span class=cl><span class=c1></span>  <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=n>tid</span><span class=p>;</span> <span class=n>i</span> <span class=o>&lt;</span> <span class=n>N</span><span class=p>;</span> <span class=n>i</span> <span class=o>+=</span> <span class=n>kBlockDim</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=n>output_row</span><span class=p>[</span><span class=n>i</span><span class=p>]</span> <span class=o>=</span> <span class=n>expf</span><span class=p>(</span><span class=n>input_row</span><span class=p>[</span><span class=n>i</span><span class=p>]</span> <span class=o>-</span> <span class=n>row_max</span><span class=p>)</span> <span class=o>/</span> <span class=n>row_norm</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=kt>void</span> <span class=nf>MySoftMax</span><span class=p>(</span><span class=kt>float</span><span class=o>*</span> <span class=n>d_X</span><span class=p>,</span> <span class=kt>float</span><span class=o>*</span> <span class=n>d_O</span><span class=p>,</span> <span class=kt>int</span> <span class=n>kM</span><span class=p>,</span> <span class=kt>int</span> <span class=n>kN</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=k>constexpr</span> <span class=kt>int</span> <span class=n>kBlockDim</span> <span class=o>=</span> <span class=mi>1024</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=n>dim3</span> <span class=n>block</span><span class=p>(</span><span class=n>kBlockDim</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=n>dim3</span> <span class=n>grid</span><span class=p>(</span><span class=n>kM</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=n>MySoftMaxKernel</span><span class=o>&lt;</span><span class=n>kBlockDim</span><span class=o>&gt;&lt;&lt;&lt;</span><span class=n>grid</span><span class=p>,</span> <span class=n>block</span><span class=o>&gt;&gt;&gt;</span><span class=p>(</span><span class=n>d_X</span><span class=p>,</span> <span class=n>d_O</span><span class=p>,</span> <span class=n>kM</span><span class=p>,</span> <span class=n>kN</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div></section><footer class=article-footer></footer><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css integrity=sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV crossorigin=anonymous><script src=https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js integrity=sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8 crossorigin=anonymous defer></script><script src=https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js integrity=sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05 crossorigin=anonymous defer></script><script>window.addEventListener("DOMContentLoaded",()=>{const e=document.querySelector(".main-article");renderMathInElement(e,{delimiters:[{left:"$$",right:"$$",display:!0},{left:"$",right:"$",display:!1},{left:"\\(",right:"\\)",display:!1},{left:"\\[",right:"\\]",display:!0}],ignoredClasses:["gist"]})})</script></article><aside class=related-content--wrapper><h2 class=section-title>相关文章</h2><div class=related-content><div class="flex article-list--tile"><article><a href=/p/ptx/><div class=article-details><h2 class=article-title>在 CUDA 中使用 PTX</h2></div></a></article><article><a href=/p/tensor_core_ptx/><div class=article-details><h2 class=article-title>通过 MMA 使用 NVIDIA GPU 的 Tensor Core</h2></div></a></article><article><a href=/p/cuda_bank_conflict/><div class=article-details><h2 class=article-title>CUDA Bank Conflict 的解决方法</h2></div></a></article><article><a href=/p/cuda_cooperative_groups/><div class=article-details><h2 class=article-title>《Cooperative Groups Flexible CUDA Thread Programming》笔记</h2></div></a></article><article><a href=/p/lower_occupancy_note/><div class=article-details><h2 class=article-title>《Better Performance at Lower Occupancy》笔记</h2></div></a></article></div></div></aside><footer class=site-footer><section class=copyright>&copy;
+2025 吕超阳的博客</section><section class=powerby>使用 <a href=https://gohugo.io/ target=_blank rel=noopener>Hugo</a> 构建<br>主题 <b><a href=https://github.com/CaiJimmy/hugo-theme-stack target=_blank rel=noopener data-version=3.30.0>Stack</a></b> 由 <a href=https://jimmycai.com target=_blank rel=noopener>Jimmy</a> 设计</section></footer><div class=pswp tabindex=-1 role=dialog aria-hidden=true><div class=pswp__bg></div><div class=pswp__scroll-wrap><div class=pswp__container><div class=pswp__item></div><div class=pswp__item></div><div class=pswp__item></div></div><div class="pswp__ui pswp__ui--hidden"><div class=pswp__top-bar><div class=pswp__counter></div><button class="pswp__button pswp__button--close" title="Close (Esc)"></button>
+<button class="pswp__button pswp__button--share" title=Share></button>
+<button class="pswp__button pswp__button--fs" title="Toggle fullscreen"></button>
+<button class="pswp__button pswp__button--zoom" title="Zoom in/out"></button><div class=pswp__preloader><div class=pswp__preloader__icn><div class=pswp__preloader__cut><div class=pswp__preloader__donut></div></div></div></div></div><div class="pswp__share-modal pswp__share-modal--hidden pswp__single-tap"><div class=pswp__share-tooltip></div></div><button class="pswp__button pswp__button--arrow--left" title="Previous (arrow left)">
+</button>
+<button class="pswp__button pswp__button--arrow--right" title="Next (arrow right)"></button><div class=pswp__caption><div class=pswp__caption__center></div></div></div></div></div><script src=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.js integrity="sha256-ePwmChbbvXbsO02lbM3HoHbSHTHFAeChekF1xKJdleo=" crossorigin=anonymous defer></script><script src=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe-ui-default.min.js integrity="sha256-UKkzOn/w1mBxRmLLGrSeyB4e1xbrp4xylgAWb3M42pU=" crossorigin=anonymous defer></script><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/default-skin/default-skin.min.css crossorigin=anonymous><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.css crossorigin=anonymous></main></div><script src=https://cdn.jsdelivr.net/npm/node-vibrant@3.1.6/dist/vibrant.min.js integrity="sha256-awcR2jno4kI5X0zL8ex0vi2z+KMkF24hUW8WePSA9HM=" crossorigin=anonymous></script><script type=text/javascript src=/ts/main.1e9a3bafd846ced4c345d084b355fb8c7bae75701c338f8a1f8a82c780137826.js defer></script><script>(function(){const e=document.createElement("link");e.href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap",e.type="text/css",e.rel="stylesheet",document.head.appendChild(e)})()</script></body></html>
