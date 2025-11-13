@@ -24,4 +24,4 @@ latest_posts:
   limit: 3 # leave blank to include all the blog posts
 ---
 
-Chaoyang Lyu is a Postdoctoral Researcher at Shanghai AI Lab. He primarily works on physics-based simulation, computer graphics and embodied AI. Before joining Shanghai AI Lab, he worked at AEROCAE Digital in 2024. He received his Ph.D. from ShanghaiTech University in 2024, advised by [Prof. Xiaopei Liu](https://faculty.sist.shanghaitech.edu.cn/faculty/liuxp/).
+Chaoyang Lyu is a Postdoctoral Researcher at Shanghai AI Lab. He primarily works on physics-based simulation, computer graphics and embodied AI. Before joining Shanghai AI Lab, he worked at AEROCAE Digital from 2021 to 2024. He received his Ph.D. from ShanghaiTech University in 2024, advised by [Prof. Xiaopei Liu](https://faculty.sist.shanghaitech.edu.cn/faculty/liuxp/).
