@@ -1,0 +1,86 @@
+name: Integration tests
+
+on:
+  push:
+    branches:
+      - master
+      - main
+      - v1.0-dev
+    paths:
+      - ".al-folio-overrides.yml"
+      - "Gemfile"
+      - "Gemfile.lock"
+      - "_config.yml"
+      - "_bibliography/**"
+      - "_data/**"
+      - "_includes/**"
+      - "_layouts/**"
+      - "_pages/**"
+      - "_posts/**"
+      - "_projects/**"
+      - "assets/**"
+      - "test/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/unit-tests.yml"
+  pull_request:
+    branches:
+      - master
+      - main
+      - v1.0-dev
+    paths:
+      - ".al-folio-overrides.yml"
+      - "Gemfile"
+      - "Gemfile.lock"
+      - "_config.yml"
+      - "_bibliography/**"
+      - "_data/**"
+      - "_includes/**"
+      - "_layouts/**"
+      - "_pages/**"
+      - "_posts/**"
+      - "_projects/**"
+      - "assets/**"
+      - "test/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/unit-tests.yml"
+
+jobs:
+  site-integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby 💎
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.5"
+          bundler-cache: true
+
+      - name: Setup Python 🐍
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install build prerequisites 🔧
+        run: |
+          sudo apt-get update && sudo apt-get install -y imagemagick
+          pip3 install --upgrade nbconvert
+
+      - name: Verify personal content and routes 🌐
+        run: bash test/integration_site_content.sh
+
+      - name: Run plugin toggle integration test 🔌
+        run: bash test/integration_plugin_toggles.sh
+
+      - name: Run bootstrap compatibility integration test 🧩
+        run: bash test/integration_bootstrap_compat.sh
+
+      - name: Run upgrade CLI integration test ⬆️
+        run: bash test/integration_upgrade_cli.sh
+
+      - name: Run CSS minify integration test 🎨
+        run: bash test/integration_css_minify.sh
